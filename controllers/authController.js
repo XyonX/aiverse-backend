@@ -1,89 +1,135 @@
-const User = require("../models/user");
+const User = require("../models/User");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
-
-//version same as portfolio
-let reg = async (req, res) => {
-  const { username, email, password } = req.body;
+exports.register = async (req, res) => {
   try {
-    const user = await User.findOne({ username });
-    if (user) {
-      return res.status(400).json({ error: "user already exists" });
+    const { username, email, password } = req.body;
+
+    // Check existing user
+    const existingUser = await User.findOne({ $or: [{ username }, { email }] });
+    if (existingUser) {
+      return res.status(400).json({ error: "User already exists" });
     }
 
-    // 🔹 Hash the password before storing it
+    // Hash password and create user
     const hashedPassword = await bcrypt.hash(password, 10);
     const newUser = new User({ username, email, password: hashedPassword });
     await newUser.save();
-    return res.status(201).json({ message: "Admin registered successfully" });
+
+    // Sanitize response
+    const sanitizedUser = {
+      _id: newUser._id,
+      username: newUser.username,
+      email: newUser.email,
+      avatar: newUser.avatar,
+      bots: newUser.bots,
+      createdAt: newUser.createdAt,
+    };
+
+    res.status(201).json({
+      message: "Registration successful",
+      user: sanitizedUser,
+    });
   } catch (error) {
-    console.error("Registration error:", error);
-    res.status(500).json({ error: "Internal Server Error" });
+    res.status(500).json({ error: error.message });
   }
 };
 
-let reg2 = async (req, res) => {
-  const { username, email, password } = req.body;
+exports.login = async (req, res) => {
   try {
-    const hashedPassword = await bcrypt.hash(password, 10);
-    const user = new User({ username, email, password: hashedPassword });
-    await user.save();
-    res.status(201).json({ message: "User registered" });
-  } catch (error) {
-    res.status(400).json({ message: error.message });
-  }
-};
+    const { username, password } = req.body;
 
-exports.register = reg;
+    // Fetch user with password for validation
+    const user = await User.findOne({ username }).select("+password");
 
-let login = async (req, res) => {
-  let { username, password } = req.body; // Fix: req.data -> req.body
-  try {
-    const user = await User.findOne({ username });
-    if (!user) {
-      return res
-        .status(404)
-        .json({ error: "Username not found. Please check your credentials." });
+    if (!user || !(await bcrypt.compare(password, user.password))) {
+      return res.status(401).json({ error: "Invalid credentials" });
     }
 
-    let isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) {
-      return res
-        .status(403)
-        .json({ error: "Incorrect password. Please try again." });
-    }
-
+    // Generate token
     const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, {
       expiresIn: "1h",
     });
 
-    // Set token as an HTTP-only cookie
+    // Set secure cookie
     res.cookie("token", token, {
-      httpOnly: true, // Prevents access from JavaScript
-      secure: process.env.NODE_ENV === "production", // Only send over HTTPS in production
-      sameSite: "strict", // Protects against CSRF
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "strict",
     });
 
-    res.json({ message: "Login successful" });
+    // Sanitize user object
+    const sanitizedUser = {
+      _id: user._id,
+      username: user.username,
+      email: user.email,
+      avatar: user.avatar,
+      bots: user.bots,
+      createdAt: user.createdAt,
+      // Include other non-sensitive fields as needed
+    };
+
+    // Send response with user data
+    res.status(200).json({
+      message: "Login successful",
+      user: sanitizedUser,
+    });
   } catch (error) {
-    console.error(error); // Logs for debugging
-    res.status(500).json({ error: "Internal Server Error" });
+    res.status(500).json({ error: error.message });
   }
 };
-let login2 = async (req, res) => {
-  const { email, password } = req.body;
+
+// exports.me = async (req, res) => {
+//   try {
+//     // User is already attached to req by verifyToken middleware
+//     const user = req.user;
+
+//     if (!user) return res.status(401).json({ message: "Unauthorized" });
+
+//     // Return sanitized user data
+//     res.json({
+//       user: {
+//         _id: user._id,
+//         username: user.username,
+//         email: user.email,
+//         avatar: user.avatar,
+//         bots: user.bots,
+//         createdAt: user.createdAt,
+//       },
+//     });
+//   } catch (error) {
+//     res.status(500).json({ error: error.message });
+//   }
+// };
+
+exports.me = async (req, res) => {
+  console.log("Debug: Authorization header:", req.headers.authorization);
+
   try {
-    const user = await User.findOne({ email });
-    if (!user || !(await bcrypt.compare(password, user.password))) {
-      return res.status(401).json({ message: "Invalid credentials" });
+    console.log("Debug: /me endpoint accessed. Request user:", req.user);
+    const user = req.user;
+
+    if (!user) {
+      console.error(
+        "Debug: Unauthorized access - no user attached to request."
+      );
+      return res.status(401).json({ message: "Unauthorized" });
     }
-    const token = jwt.sign({ id: user._id }, "your_jwt_secret", {
-      expiresIn: "1h",
-    });
-    res.json({ token });
+
+    // Return sanitized user data
+    const sanitizedUser = {
+      _id: user._id,
+      username: user.username,
+      email: user.email,
+      avatar: user.avatar,
+      bots: user.bots,
+      createdAt: user.createdAt,
+    };
+
+    console.log("Debug: Responding with sanitized user data:", sanitizedUser);
+    res.json({ user: sanitizedUser });
   } catch (error) {
-    res.status(500).json({ message: error.message });
+    console.error("Debug: Error in /me controller:", error);
+    res.status(500).json({ error: error.message });
   }
 };
-
-exports.login = login;
