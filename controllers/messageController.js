@@ -101,6 +101,7 @@ const Conversation = require("../models/conversation");
 const Bot = require("../models/bot");
 const { OpenAI } = require("openai"); // Example using OpenAI
 const { decrypt } = require("../utils/encryption");
+
 exports.createMessage = async (req, res) => {
   try {
     const { conversationId, content } = req.body;
@@ -108,6 +109,9 @@ exports.createMessage = async (req, res) => {
     console.log("Received request to create message.");
     console.log("Conversation ID:", conversationId);
     console.log("Message content:", content);
+
+    console.log("Logging content received from user");
+    console.log(content);
 
     // 1. Save user message
     console.log("Saving user message...");
