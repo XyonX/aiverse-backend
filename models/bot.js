@@ -54,4 +54,7 @@ const botSchema = new mongoose.Schema({
   },
 });
 
-module.exports = mongoose.model("Bot", botSchema, "aiverse-bot");
+// module.exports = mongoose.model("Bot", botSchema, "aiverse-bot");
+// Check if the User model already exists. If so, reuse it.
+module.exports =
+  mongoose.models.Bot || mongoose.model("Bot", botSchema, "aiverse-bot");
