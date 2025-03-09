@@ -1,5 +1,5 @@
 const mongoose = require("mongoose");
-const Bot = require("./Bot"); // Import the Bot model
+const Bot = require("./bot"); // Import the Bot model
 
 const userSchema = new mongoose.Schema({
   username: {
