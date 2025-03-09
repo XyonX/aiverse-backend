@@ -13,7 +13,7 @@ const { encrypt } = require("../utils/encryption");
 //   //   res.status(500).json({ message: error.message });
 //   // }
 
-//   const { id } = req.params;
+//   const { id } = req.params;`
 //   if (id) {
 //     const bot = await Bot.findById(id);
 //     res.json(bot);
