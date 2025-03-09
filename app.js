@@ -14,7 +14,11 @@ connectDB();
 
 app.use(
   cors({
-    origin: ["http://localhost:3000", "https://aiverseapp.onrender.com"],
+    origin: [
+      "http://localhost:3000",
+      "https://aiverseapp.onrender.com",
+      "https://www.aiverseapp.onrender.com",
+    ],
     methods: "GET,POST,PUT,DELETE",
     credentials: true,
   })
