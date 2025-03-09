@@ -1,5 +1,5 @@
-const Bot = require("../models/Bot");
-const User = require("../models/User");
+const Bot = require("../models/bot");
+const User = require("../models/user");
 const { encrypt } = require("../utils/encryption");
 
 // exports.getBots = async (req, res) => {
