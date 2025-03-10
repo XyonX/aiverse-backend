@@ -15,18 +15,12 @@ function formatSize(bytes) {
 
 exports.createMessage = async (req, res) => {
   try {
-    const { textContent, conversationId } = req.body;
+    const { textContent, conversationId, tempUserMessageId, tempBotMessageId } =
+      req.body;
     const file = req.file;
+    let finalTextContent = textContent || "Explain the image or file";
 
-    // Ensure textContent is set properly
-    let finalTextContent = textContent || "Explain the image or file"; // Default fallback
-
-    console.log("Received request to create message.");
-    console.log("Conversation ID:", conversationId);
-    console.log("Message content:", textContent);
-    console.log("File:", file);
-
-    // 1. Create user message based on request data
+    // 1. Create user message
     let userMessage;
     if (file) {
       const isImage = file.mimetype.startsWith("image/");
@@ -34,12 +28,11 @@ exports.createMessage = async (req, res) => {
         userMessage = new Message.Image({
           conversation: conversationId,
           sender: "user",
-          // caption: content, // Text sent with the image
           textContent: finalTextContent,
           images: [
             {
-              url: `/uploads/${file.filename}`, // URL for frontend access
-              name: file.originalname, // Original filename
+              url: `/uploads/${file.filename}`,
+              name: file.originalname,
             },
           ],
         });
@@ -47,18 +40,16 @@ exports.createMessage = async (req, res) => {
         userMessage = new Message.File({
           conversation: conversationId,
           sender: "user",
-          // caption: content, // Text sent with the file
           textContent: finalTextContent,
           file: {
             url: `/uploads/${file.filename}`,
             name: file.originalname,
-            size: formatSize(file.size), // Convert bytes to human-readable string
+            size: formatSize(file.size),
           },
         });
       }
     } else {
       if (!textContent) {
-        console.log("Contet or text not received");
         return res
           .status(400)
           .json({ message: "Content is required for text messages" });
@@ -70,70 +61,153 @@ exports.createMessage = async (req, res) => {
       });
     }
     await userMessage.save();
-    console.log("User message saved with ID:", userMessage._id);
 
     // 2. Fetch conversation and bot configuration
-    console.log("Fetching conversation and bot configuration...");
     const conversation = await Conversation.findById(conversationId).populate(
       "bot"
     );
     if (!conversation) {
-      console.error("Conversation not found for ID:", conversationId);
       return res.status(404).json({ message: "Conversation not found" });
     }
-    console.log("Conversation fetched:", conversation);
     const bot = conversation.bot;
-    console.log("Bot configuration:", bot);
 
-    // 3. Generate bot response
-    console.log("Generating bot response...");
-    const openai = new OpenAI({
-      apiKey: decrypt(bot.apiKey),
-      baseURL: bot.endpoint,
-    });
+    // 3. Handle streaming response
+    if (bot.streamingEnabled) {
+      res.setHeader("Content-Type", "text/event-stream");
+      res.setHeader("Cache-Control", "no-cache");
+      res.setHeader("Connection", "keep-alive");
 
-    const requestData = {
-      messages: [
-        {
-          role: "system",
-          content: bot.context || "You are a helpful assistant.",
-        },
-        { role: "user", content: textContent },
-      ],
-      model: bot.model,
-    };
-    console.log("Data passed to OpenAI:", requestData);
+      // Create initial bot message
+      const botMessage = new Message.Text({
+        conversation: conversationId,
+        sender: "bot",
+        textContent: "",
+      });
+      await botMessage.save();
 
-    const completion = await openai.chat.completions.create(requestData);
-    const botContent = completion.choices[0].message.content;
-    console.log("Bot response generated:", botContent);
+      // Send initialization event
+      res.write(
+        `data: ${JSON.stringify({
+          type: "init",
+          tempUserMessageId,
+          userMessage: userMessage.toObject(),
+          tempBotMessageId,
+          botMessage: botMessage.toObject(),
+        })}\n\n`
+      );
 
-    // 4. Save bot message (always text)
-    console.log("Saving bot message...");
-    const botMessage = new Message.Text({
-      conversation: conversationId,
-      sender: "bot",
-      textContent: botContent,
-    });
-    await botMessage.save();
-    console.log("Bot message saved with ID:", botMessage._id);
+      // Update conversation with both messages
+      await Conversation.findByIdAndUpdate(conversationId, {
+        $push: { messages: { $each: [userMessage._id, botMessage._id] } },
+        $set: { lastMessageTimestamp: Date.now() },
+      });
 
-    // 5. Update conversation
-    console.log("Updating conversation with new messages...");
-    await Conversation.findByIdAndUpdate(conversationId, {
-      $push: { messages: { $each: [userMessage._id, botMessage._id] } },
-      lastMessageTimestamp: Date.now(),
-    });
-    console.log("Conversation updated successfully.");
+      // Initialize OpenAI
+      const openai = new OpenAI({
+        apiKey: decrypt(bot.apiKey),
+        baseURL: bot.endpoint,
+      });
 
-    // 6. Send response with full message objects
-    res.json({
-      userMessage: userMessage.toObject(), // Includes type and specific fields
-      botMessage: botMessage.toObject(),
-    });
+      try {
+        // Stream OpenAI response
+        const stream = await openai.chat.completions.create({
+          messages: [
+            {
+              role: "system",
+              content: bot.context || "You are a helpful assistant.",
+            },
+            { role: "user", content: finalTextContent }, // Changed from textContent to finalTextContent
+          ],
+          model: bot.model,
+          stream: true,
+        });
+
+        let fullContent = "";
+        for await (const chunk of stream) {
+          const content = chunk.choices[0]?.delta?.content || "";
+          if (content) {
+            fullContent += content;
+            res.write(
+              `data: ${JSON.stringify({
+                type: "chunk",
+                botMessageId: botMessage._id.toString(),
+                content: content,
+              })}\n\n`
+            );
+          }
+        }
+
+        // Update final bot message
+        botMessage.textContent = fullContent;
+        await botMessage.save();
+
+        // Send completion event
+        res.write(
+          `data: ${JSON.stringify({
+            type: "complete",
+            botMessage: botMessage.toObject(),
+          })}\n\n`
+        );
+      } catch (error) {
+        console.error("Streaming error:", error);
+        res.write(
+          `data: ${JSON.stringify({
+            type: "error",
+            message: "Error generating response",
+          })}\n\n`
+        );
+      } finally {
+        res.end();
+      }
+    } else {
+      // Non-streaming logic
+      const openai = new OpenAI({
+        apiKey: decrypt(bot.apiKey),
+        baseURL: bot.endpoint,
+      });
+
+      const completion = await openai.chat.completions.create({
+        messages: [
+          {
+            role: "system",
+            content: bot.context || "You are a helpful assistant.",
+          },
+          { role: "user", content: finalTextContent }, // Changed from textContent to finalTextContent
+        ],
+        model: bot.model,
+      });
+
+      const botContent = completion.choices[0].message.content;
+      const botMessage = new Message.Text({
+        conversation: conversationId,
+        sender: "bot",
+        textContent: botContent,
+      });
+      await botMessage.save();
+
+      await Conversation.findByIdAndUpdate(conversationId, {
+        $push: { messages: { $each: [userMessage._id, botMessage._id] } },
+        $set: { lastMessageTimestamp: Date.now() },
+      });
+
+      res.json({
+        userMessage: userMessage.toObject(),
+        botMessage: botMessage.toObject(),
+      });
+    }
   } catch (error) {
     console.error("Error in createMessage:", error);
-    res.status(500).json({ message: "Error sending message" });
+    if (res.headersSent) {
+      res.write(
+        `data: ${JSON.stringify({
+          type: "error",
+          message: "Error processing message",
+        })}\n\n`
+      );
+      res.end();
+    } else {
+      res.status(500).json({ message: "Error sending message" });
+    }
   }
 };
 
