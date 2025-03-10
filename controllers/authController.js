@@ -56,6 +56,7 @@ exports.login = async (req, res) => {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: "none",
+      domain: ".aiverseapp.site", // allows cookie on all subdomains
     });
 
     // Sanitize user object
