@@ -1,3 +1,4 @@
+//messageController.js
 const Message = require("../models/message");
 const Conversation = require("../models/conversation");
 const { OpenAI } = require("openai"); // Example using OpenAI

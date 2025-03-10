@@ -51,12 +51,12 @@ exports.login = async (req, res) => {
       expiresIn: "24h",
     });
 
-    // Set secure cookie
     res.cookie("token", token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: "none",
-      domain: ".aiverseapp.site", // allows cookie on all subdomains
+      domain:
+        process.env.NODE_ENV === "production" ? ".aiverseapp.site" : undefined, // No domain on localhost
     });
 
     // Sanitize user object
