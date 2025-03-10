@@ -17,6 +17,7 @@ app.use(
     origin: [
       "http://localhost:3000",
       "https://aiverseapp.onrender.com",
+      "https://aiverseapp.site",
       "https://www.aiverseapp.onrender.com",
     ],
     methods: "GET,POST,PUT,DELETE",
