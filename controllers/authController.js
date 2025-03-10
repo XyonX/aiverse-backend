@@ -48,14 +48,14 @@ exports.login = async (req, res) => {
 
     // Generate token
     const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, {
-      expiresIn: "1h",
+      expiresIn: "24h",
     });
 
     // Set secure cookie
     res.cookie("token", token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
-      sameSite: "strict",
+      sameSite: "none",
     });
 
     // Sanitize user object
@@ -78,29 +78,6 @@ exports.login = async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 };
-
-// exports.me = async (req, res) => {
-//   try {
-//     // User is already attached to req by verifyToken middleware
-//     const user = req.user;
-
-//     if (!user) return res.status(401).json({ message: "Unauthorized" });
-
-//     // Return sanitized user data
-//     res.json({
-//       user: {
-//         _id: user._id,
-//         username: user.username,
-//         email: user.email,
-//         avatar: user.avatar,
-//         bots: user.bots,
-//         createdAt: user.createdAt,
-//       },
-//     });
-//   } catch (error) {
-//     res.status(500).json({ error: error.message });
-//   }
-// };
 
 exports.me = async (req, res) => {
   console.log("Debug: Authorization header:", req.headers.authorization);

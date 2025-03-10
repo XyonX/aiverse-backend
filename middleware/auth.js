@@ -1,22 +1,6 @@
 const jwt = require("jsonwebtoken");
 const User = require("../models/user");
 
-// exports.authenticateToken = (req, res, next) => {
-//   const token = req.cookies.token;
-
-//   if (!token) {
-//     return res.status(401).json({ error: "No token provided" });
-//   }
-
-//   jwt.verify(token, process.env.JWT_SECRET, (err, user) => {
-//     if (err) {
-//       return res.status(403).json({ error: "Invalid token" });
-//     }
-
-//     req.user = user;
-//     next();
-//   });
-// };
 exports.verifyToken = async (req, res, next) => {
   try {
     console.log("Debug: verifyToken middleware accessed.");
