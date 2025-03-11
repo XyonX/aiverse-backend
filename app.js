@@ -27,7 +27,7 @@ connectDB();
 // );
 app.use(
   cors({
-    origin: ["http://localhost:3000", "https://joycodes.tech"],
+    origin: ["http://localhost:3000", "https://aiverseapp.site"],
     methods: "GET,POST,PUT,DELETE",
     credentials: true,
   })
