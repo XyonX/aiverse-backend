@@ -2,6 +2,11 @@ const mongoose = require("mongoose");
 const Bot = require("./bot"); // Import the Bot model
 
 const userSchema = new mongoose.Schema({
+  firebaseUid: {
+    type: String,
+    required: true,
+    unique: true,
+  },
   username: {
     type: String,
     required: true,
@@ -15,11 +20,11 @@ const userSchema = new mongoose.Schema({
     lowercase: true,
     trim: true,
   },
-  password: {
-    type: String,
-    required: true,
-    select: false, // Exclude password by default
-  },
+  // password: {
+  //   type: String,
+  //   required: true,
+  //   select: false, // Exclude password by default
+  // },
   avatar: {
     type: String,
     default: "default-avatar.png",

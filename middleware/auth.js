@@ -1,47 +1,68 @@
 const jwt = require("jsonwebtoken");
 const User = require("../models/user");
+const admin = require("firebase-admin");
 
 exports.verifyToken = async (req, res, next) => {
   try {
-    console.log("Debug: verifyToken middleware accessed.");
-    console.log("Debug: Cookies received:", req.cookies);
+    console.log("[verifyToken] Middleware accessed.");
+    console.log(
+      "[verifyToken] Request headers:",
+      JSON.stringify(req.headers, null, 2)
+    );
 
-    // 1. Get token from cookies
-    const token = req.cookies.token;
-    console.log("Debug: Token received:", token);
+    // 1. Get token from Authorization header or cookies
+    let idToken;
+    if (
+      req.headers.authorization &&
+      req.headers.authorization.startsWith("Bearer ")
+    ) {
+      idToken = req.headers.authorization.split("Bearer ")[1];
+    } else if (req.cookies && req.cookies.token) {
+      idToken = req.cookies.token;
+    }
 
-    if (!token) {
-      console.error("Debug: Unauthorized - No token provided");
+    console.log("[verifyToken] Extracted Token:", idToken);
+
+    if (!idToken) {
+      console.error("[verifyToken] Unauthorized - No token provided");
       return res
         .status(401)
         .json({ error: "Unauthorized - No token provided" });
     }
 
-    // 2. Verify JWT
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    console.log("Debug: Decoded JWT:", decoded);
+    // 2. Verify the token using Firebase Admin SDK
+    console.log("[verifyToken] Verifying Firebase ID token...");
+    const decodedToken = await admin.auth().verifyIdToken(idToken);
+    console.log(
+      "[verifyToken] Decoded Firebase Token:",
+      JSON.stringify(decodedToken, null, 2)
+    );
 
-    // 3. Find user in database
-    const user = await User.findById(decoded.id).select("-password");
-    console.log("Debug: Retrieved user from database:", user);
+    // 3. Find the corresponding user in MongoDB using firebaseUid
+    console.log("[verifyToken] Searching for user in database...");
+    const user = await User.findOne({ firebaseUid: decodedToken.uid }).select(
+      "-password"
+    );
+    console.log("[verifyToken] Retrieved User from Database:", user);
 
     if (!user) {
-      console.error("Debug: Unauthorized - User not found");
+      console.error("[verifyToken] Unauthorized - User not found");
       return res.status(401).json({ error: "Unauthorized - User not found" });
     }
 
-    // 4. Attach user to request object
+    // 4. Attach the user to the request object
     req.user = user;
     console.log(
-      "Debug: User attached to request. Response from middleware:",
-      user
+      "[verifyToken] User attached to request:",
+      JSON.stringify(user, null, 2)
+    );
+
+    console.log(
+      "[verifyToken] Middleware execution successful. Moving to next handler."
     );
     next();
   } catch (error) {
-    console.error("Debug: Error in verifyToken middleware:", error);
-    if (error.name === "JsonWebTokenError") {
-      return res.status(401).json({ error: "Unauthorized - Invalid token" });
-    }
-    res.status(500).json({ error: error.message });
+    console.error("[verifyToken] Error in middleware:", error);
+    return res.status(401).json({ error: "Unauthorized - Invalid token" });
   }
 };

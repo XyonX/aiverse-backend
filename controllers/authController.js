@@ -1,20 +1,43 @@
 const User = require("../models/user");
 const bcrypt = require("bcrypt");
-const jwt = require("jsonwebtoken");
+const admin = require("../config/firebaseAdmin"); // Your initialized firebase-admin instance
+
 exports.register = async (req, res) => {
   try {
-    const { username, email, password } = req.body;
+    console.log("Received request at /register");
+    console.log("Request body:", req.body);
 
-    // Check existing user
-    const existingUser = await User.findOne({ $or: [{ username }, { email }] });
+    const { idToken, username } = req.body;
+    console.log("Extracted idToken:", idToken);
+    console.log("Extracted username:", username);
+
+    // Verify the Firebase ID token
+    console.log("Verifying Firebase ID token...");
+    //this contains data like email,password
+    const decodedToken = await admin.auth().verifyIdToken(idToken);
+    console.log("Decoded token:", decodedToken);
+
+    const { uid, email } = decodedToken;
+    console.log("Extracted UID:", uid);
+    console.log("Extracted email:", email);
+
+    // Check if the user already exists in your MongoDB collection
+    console.log("Checking if user already exists in database...");
+    const existingUser = await User.findOne({ firebaseUid: uid });
     if (existingUser) {
+      console.log("User already exists:", existingUser);
       return res.status(400).json({ error: "User already exists" });
     }
 
-    // Hash password and create user
-    const hashedPassword = await bcrypt.hash(password, 10);
-    const newUser = new User({ username, email, password: hashedPassword });
+    // Create a new user document
+    console.log("Creating new user in database...");
+    const newUser = new User({
+      firebaseUid: uid,
+      username,
+      email,
+    });
     await newUser.save();
+    console.log("New user saved successfully:", newUser);
 
     // Sanitize response
     const sanitizedUser = {
@@ -25,41 +48,46 @@ exports.register = async (req, res) => {
       bots: newUser.bots,
       createdAt: newUser.createdAt,
     };
+    console.log("Sanitized user response:", sanitizedUser);
 
     res.status(201).json({
       message: "Registration successful",
       user: sanitizedUser,
     });
   } catch (error) {
+    console.error("Error during registration:", error);
     res.status(500).json({ error: error.message });
   }
 };
 
 exports.login = async (req, res) => {
   try {
-    const { username, password } = req.body;
+    console.log("Login request received");
+    const { idToken } = req.body;
 
-    // Fetch user with password for validation
-    const user = await User.findOne({ username }).select("+password");
-
-    if (!user || !(await bcrypt.compare(password, user.password))) {
-      return res.status(401).json({ error: "Invalid credentials" });
+    if (!idToken) {
+      console.error("Missing idToken in request");
+      return res.status(400).json({ error: "Missing idToken" });
     }
+    console.log("ID Token received:", idToken);
 
-    // Generate token
-    const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, {
-      expiresIn: "24h",
-    });
+    // Verify the Firebase ID token
+    console.log("Verifying Firebase ID token...");
+    const decodedToken = await admin.auth().verifyIdToken(idToken);
+    const { uid } = decodedToken;
+    console.log("Decoded token UID:", uid);
 
-    res.cookie("token", token, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === "production",
-      sameSite: "none",
-      domain:
-        process.env.NODE_ENV === "production" ? ".aiverseapp.site" : undefined, // No domain on localhost
-    });
+    // Find the corresponding user in MongoDB
+    console.log("Searching for user in database...");
+    const user = await User.findOne({ firebaseUid: uid });
 
-    // Sanitize user object
+    if (!user) {
+      console.error("User not found in database");
+      return res.status(401).json({ error: "User not found" });
+    }
+    console.log("User found:", user);
+
+    // Sanitize response
     const sanitizedUser = {
       _id: user._id,
       username: user.username,
@@ -67,30 +95,30 @@ exports.login = async (req, res) => {
       avatar: user.avatar,
       bots: user.bots,
       createdAt: user.createdAt,
-      // Include other non-sensitive fields as needed
     };
+    console.log("Sanitized user data prepared");
 
-    // Send response with user data
     res.status(200).json({
       message: "Login successful",
       user: sanitizedUser,
     });
+    console.log("Login successful, response sent");
   } catch (error) {
+    console.error("Error during login:", error.message);
     res.status(500).json({ error: error.message });
   }
 };
 
 exports.me = async (req, res) => {
-  console.log("Debug: Authorization header:", req.headers.authorization);
+  console.log("[me] Endpoint accessed.");
+  console.log("[me] Authorization header:", req.headers.authorization);
 
   try {
-    console.log("Debug: /me endpoint accessed. Request user:", req.user);
+    console.log("[me] Request user:", JSON.stringify(req.user, null, 2));
     const user = req.user;
 
     if (!user) {
-      console.error(
-        "Debug: Unauthorized access - no user attached to request."
-      );
+      console.error("[me] Unauthorized access - no user attached to request.");
       return res.status(401).json({ message: "Unauthorized" });
     }
 
@@ -104,10 +132,13 @@ exports.me = async (req, res) => {
       createdAt: user.createdAt,
     };
 
-    console.log("Debug: Responding with sanitized user data:", sanitizedUser);
+    console.log(
+      "[me] Responding with sanitized user data:",
+      JSON.stringify(sanitizedUser, null, 2)
+    );
     res.json({ user: sanitizedUser });
   } catch (error) {
-    console.error("Debug: Error in /me controller:", error);
+    console.error("[me] Error in /me controller:", error);
     res.status(500).json({ error: error.message });
   }
 };
