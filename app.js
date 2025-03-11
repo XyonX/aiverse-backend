@@ -12,15 +12,22 @@ const cookieParser = require("cookie-parser");
 const app = express();
 connectDB();
 
+// app.use(
+//   cors({
+//     origin: [
+//       "http://localhost:3000",
+//       "https://aiverseapp.site",
+//       "https://www.aiverseapp.site",
+//       "https://aiverseapp.onrender.com",
+//       "https://www.aiverseapp.onrender.com",
+//     ],
+//     methods: "GET,POST,PUT,DELETE",
+//     credentials: true,
+//   })
+// );
 app.use(
   cors({
-    origin: [
-      "http://localhost:3000",
-      "https://aiverseapp.site",
-      "https://www.aiverseapp.site",
-      "https://aiverseapp.onrender.com",
-      "https://www.aiverseapp.onrender.com",
-    ],
+    origin: ["http://localhost:3000", "https://joycodes.tech"],
     methods: "GET,POST,PUT,DELETE",
     credentials: true,
   })
