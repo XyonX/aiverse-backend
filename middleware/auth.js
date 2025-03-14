@@ -17,8 +17,10 @@ exports.verifyToken = async (req, res, next) => {
       req.headers.authorization.startsWith("Bearer ")
     ) {
       idToken = req.headers.authorization.split("Bearer ")[1];
+      console.log("[VerToken:IDtoken received in auth header");
     } else if (req.cookies && req.cookies.token) {
       idToken = req.cookies.token;
+      console.log("[VerToken:IDtoken received in cookie");
     }
 
     console.log("[verifyToken] Extracted Token:", idToken);

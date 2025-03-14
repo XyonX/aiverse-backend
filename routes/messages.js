@@ -6,7 +6,7 @@ const messageController = require("../controllers/messageController");
 const { verifyToken } = require("../middleware/auth");
 
 // Create new message
-router.post("/", verifyToken, messageController.createMessage);
+router.post("/", messageController.createMessage);
 
 // Get messages for conversation
 router.get(

@@ -135,23 +135,22 @@ exports.createMessage = async (req, res) => {
     // 4. Handle streaming response
     if (bot.streamingEnabled) {
       console.log("[Streaming] Streaming is enabled. Preparing response...");
-
       res.setHeader("Content-Type", "text/event-stream");
       res.setHeader("Cache-Control", "no-cache");
       res.setHeader("Connection", "keep-alive");
-
       let botMessage;
+
       try {
         console.log("[Streaming] Creating initial bot message...");
-
         // Create initial bot message
         botMessage = new Message.Text({
           conversation: conversationId,
           sender: "bot",
-          textContent: "",
+          textContent: "PLACEHOLDER", // or any placeholder text
+
+          isTemporary: true,
         });
         await botMessage.save();
-
         console.log("[Streaming] Bot message created with ID:", botMessage._id);
       } catch (botMessageError) {
         console.error(
@@ -164,105 +163,182 @@ exports.createMessage = async (req, res) => {
           .json({ message: "Failed to initialize response" });
       }
 
-      try {
-        console.log("[Streaming] Updating conversation with new messages...");
+      // console.log("[Streaming] Updating conversation with new messages...");
+      // // Update conversation after both messages are successfully created
+      // await Conversation.findByIdAndUpdate(conversationId, {
+      //   $push: { messages: { $each: [userMessage._id, botMessage._id] } },
+      //   $set: { lastMessageTimestamp: new Date() },
+      // });
+      // console.log("[Streaming] Conversation updated successfully.");
 
-        // Update conversation after both messages are successfully created
-        await Conversation.findByIdAndUpdate(conversationId, {
-          $push: { messages: { $each: [userMessage._id, botMessage._id] } },
-          $set: { lastMessageTimestamp: new Date() },
-        });
+      // Send the initial event with both messages
+      res.write(
+        `data: ${JSON.stringify({ type: "init", userMessage, botMessage })}\n\n`
+      );
+      console.log("[Streaming] Sent initialization event.");
 
-        console.log("[Streaming] Conversation updated successfully.");
+      // Immediately update the conversation so that the frontend sees the new messages
+      await Conversation.findByIdAndUpdate(conversationId, {
+        $push: { messages: { $each: [userMessage._id, botMessage._id] } },
+        $set: { lastMessageTimestamp: new Date() },
+      });
+      console.log("[Streaming] Conversation updated with new messages.");
 
-        // Send initialization event
-        res.write(
-          `data: ${JSON.stringify({
-            type: "init",
-            tempUserMessageId,
-            userMessage: userMessage.toObject(),
-            tempBotMessageId,
-            botMessage: botMessage.toObject(),
-          })}\n\n`
-        );
+      const stream = await openai.chat.completions.create({
+        model: bot.model,
+        messages: [
+          {
+            role: "system",
+            content: bot.context || "You are a helpful assistant.",
+          },
+          { role: "user", content: textContent },
+        ],
+        stream: true,
+      });
 
-        console.log(
-          "[Streaming] Sent initialization event. Starting OpenAI response streaming..."
-        );
-
-        // Stream OpenAI response
-        const stream = await openai.chat.completions.create({
-          messages: [
-            {
-              role: "system",
-              content: bot.context || "You are a helpful assistant.",
-            },
-            { role: "user", content: finalTextContent },
-          ],
-          model: bot.model,
-          stream: true,
-        });
-
-        let fullContent = "";
-        for await (const chunk of stream) {
-          const content = chunk.choices[0]?.delta?.content || "";
-          if (content) {
-            fullContent += content;
-
-            console.log(
-              `[Streaming] Received chunk: ${content.length} characters`
-            );
-
-            res.write(
-              `data: ${JSON.stringify({
-                type: "chunk",
-                botMessageId: botMessage._id.toString(),
-                content: content,
-              })}\n\n`
-            );
-          }
+      // for await (const chunk of stream) {
+      //   console.log(chunk);
+      //   console.log(chunk.choices[0].delta);
+      //   console.log("****************");
+      // }
+      // Process each streaming chunk
+      for await (const chunk of stream) {
+        if (chunk.choices?.[0]?.delta?.content) {
+          const contentChunk = chunk.choices[0].delta.content;
+          botMessage.textContent += contentChunk;
+          await botMessage.save();
+          res.write(
+            `data: ${JSON.stringify({
+              type: "chunk",
+              content: contentChunk,
+            })}\n\n`
+          );
         }
-
-        console.log(
-          "[Streaming] OpenAI response complete. Updating final bot message..."
-        );
-
-        // Update final bot message
-        botMessage.textContent = fullContent;
-        await botMessage.save();
-
-        console.log("[Streaming] Bot message updated successfully.");
-
-        // Send completion event
-        res.write(
-          `data: ${JSON.stringify({
-            type: "complete",
-            botMessage: botMessage.toObject(),
-          })}\n\n`
-        );
-
-        console.log("[Streaming] Sent completion event. Streaming finished.");
-      } catch (streamError) {
-        console.error(
-          "[Streaming] Error occurred while streaming response:",
-          streamError
-        );
-
-        console.log("[Streaming] Cleaning up failed messages...");
-        // Clean up failed messages
-        await Promise.all([botMessage?.remove(), userMessage.remove()]);
-
-        console.log("[Streaming] Sending error response to client...");
-        res.write(
-          `data: ${JSON.stringify({
-            type: "error",
-            message: "Error generating response",
-          })}\n\n`
-        );
-      } finally {
-        console.log("[Streaming] Closing response stream.");
-        res.end();
       }
+
+      // Finalize the bot message once streaming is complete
+      botMessage.isTemporary = false;
+      botMessage.textContent = botMessage.textContent.replace(
+        /^PLACEHOLDER\s*/,
+        ""
+      );
+      await botMessage.save();
+      res.write(
+        `data: ${JSON.stringify({ type: "complete", botMessage })}\n\n`
+      );
+      res.end();
+
+      console.log("[Streaming] Bot message saved and response completed.");
+
+      // console.log("[Streaming] Streaming is enabled. Preparing response...");
+      // res.setHeader("Content-Type", "text/event-stream");
+      // res.setHeader("Cache-Control", "no-cache");
+      // res.setHeader("Connection", "keep-alive");
+      // let botMessage;
+      // try {
+      //   console.log("[Streaming] Creating initial bot message...");
+      //   // Create initial bot message
+      //   botMessage = new Message.Text({
+      //     conversation: conversationId,
+      //     sender: "bot",
+      //     textContent: "",
+      //   });
+      //   await botMessage.save();
+      //   console.log("[Streaming] Bot message created with ID:", botMessage._id);
+      // } catch (botMessageError) {
+      //   console.error(
+      //     "[Streaming] Bot message creation failed:",
+      //     botMessageError
+      //   );
+      //   await userMessage.remove();
+      //   return res
+      //     .status(500)
+      //     .json({ message: "Failed to initialize response" });
+      // }
+      // try {
+      //   console.log("[Streaming] Updating conversation with new messages...");
+      //   // Update conversation after both messages are successfully created
+      //   await Conversation.findByIdAndUpdate(conversationId, {
+      //     $push: { messages: { $each: [userMessage._id, botMessage._id] } },
+      //     $set: { lastMessageTimestamp: new Date() },
+      //   });
+      //   console.log("[Streaming] Conversation updated successfully.");
+      //   // Send initialization event
+      //   res.write(
+      //     `data: ${JSON.stringify({
+      //       type: "init",
+      //       tempUserMessageId,
+      //       userMessage: userMessage.toObject(),
+      //       tempBotMessageId,
+      //       botMessage: botMessage.toObject(),
+      //     })}\n\n`
+      //   );
+      //   console.log(
+      //     "[Streaming] Sent initialization event. Starting OpenAI response streaming..."
+      //   );
+      //   // Stream OpenAI response
+      //   const stream = await openai.chat.completions.create({
+      //     messages: [
+      //       {
+      //         role: "system",
+      //         content: bot.context || "You are a helpful assistant.",
+      //       },
+      //       { role: "user", content: finalTextContent },
+      //     ],
+      //     model: bot.model,
+      //     stream: true,
+      //   });
+      //   let fullContent = "";
+      //   for await (const chunk of stream) {
+      //     const content = chunk.choices[0]?.delta?.content || "";
+      //     if (content) {
+      //       fullContent += content;
+      //       console.log(
+      //         `[Streaming] Received chunk: ${content.length} characters`
+      //       );
+      //       res.write(
+      //         `data: ${JSON.stringify({
+      //           type: "chunk",
+      //           botMessageId: botMessage._id.toString(),
+      //           content: content,
+      //         })}\n\n`
+      //       );
+      //     }
+      //   }
+      //   console.log(
+      //     "[Streaming] OpenAI response complete. Updating final bot message..."
+      //   );
+      //   // Update final bot message
+      //   botMessage.textContent = fullContent;
+      //   await botMessage.save();
+      //   console.log("[Streaming] Bot message updated successfully.");
+      //   // Send completion event
+      //   res.write(
+      //     `data: ${JSON.stringify({
+      //       type: "complete",
+      //       botMessage: botMessage.toObject(),
+      //     })}\n\n`
+      //   );
+      //   console.log("[Streaming] Sent completion event. Streaming finished.");
+      // } catch (streamError) {
+      //   console.error(
+      //     "[Streaming] Error occurred while streaming response:",
+      //     streamError
+      //   );
+      //   console.log("[Streaming] Cleaning up failed messages...");
+      //   // Clean up failed messages
+      //   await Promise.all([botMessage?.remove(), userMessage.remove()]);
+      //   console.log("[Streaming] Sending error response to client...");
+      //   res.write(
+      //     `data: ${JSON.stringify({
+      //       type: "error",
+      //       message: "Error generating response",
+      //     })}\n\n`
+      //   );
+      // } finally {
+      //   console.log("[Streaming] Closing response stream.");
+      //   res.end();
+      // }
     } else {
       console.log(
         "[Response] Streaming is disabled. Using non-streaming response method..."

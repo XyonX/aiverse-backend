@@ -8,18 +8,22 @@ const { verifyToken } = require("../middleware/auth");
 // Get all conversations for a user
 router.get(
   "/user/:userId",
-  verifyToken,
+  // verifyToken,
   conversationController.getUserConversations
 );
 
 // Get specific conversation between user and bot
 router.get(
   "/user/:userId/bot/:botId",
-  verifyToken,
+  // verifyToken,
   conversationController.getUserBotConversation
 );
 
 // Create new conversation
-router.post("/", verifyToken, conversationController.createConversation);
+router.post(
+  "/",
+  // verifyToken
+  conversationController.createConversation
+);
 
 module.exports = router;
