@@ -1,3 +1,4 @@
+//message.js
 const mongoose = require("mongoose");
 
 // Define the base schema for all messages

@@ -94,6 +94,7 @@ exports.login = async (req, res) => {
       email: user.email,
       avatar: user.avatar,
       bots: user.bots,
+      preferences: user.preferences,
       createdAt: user.createdAt,
     };
     console.log("Sanitized user data prepared");
@@ -129,6 +130,7 @@ exports.me = async (req, res) => {
       email: user.email,
       avatar: user.avatar,
       bots: user.bots,
+      preferences: user.preferences,
       createdAt: user.createdAt,
     };
 
@@ -142,3 +144,5 @@ exports.me = async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 };
+
+

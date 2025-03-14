@@ -1,3 +1,4 @@
+//bot.js
 const mongoose = require("mongoose");
 
 const botSchema = new mongoose.Schema({
@@ -48,9 +49,29 @@ const botSchema = new mongoose.Schema({
     default: Date.now,
   },
   context: {
-    type: String,
-    default: "You are a helpful assistant.", // Default for general bots
+    systemMessage: {
+      type: String,
+      default: "You are an AI assistant in the AIVERSE app.",
+    },
+    personality: {
+      type: String,
+      enum: ["friendly", "formal", "sarcastic", "professional"],
+      default: "friendly",
+    },
+    knowledgeScope: {
+      type: [String], // Array to specify knowledge areas
+      default: ["general"],
+    },
+    memoryEnabled: {
+      type: Boolean,
+      default: false, // Determines if bot retains past interactions
+    },
+    restrictions: {
+      type: [String], // Topics or actions the bot should avoid
+      default: [],
+    },
   },
+
   category: {
     type: String,
     enum: ["general", "role-playing", "specialized"],

@@ -1,3 +1,4 @@
+//user.js
 const mongoose = require("mongoose");
 const Bot = require("./bot"); // Import the Bot model
 
@@ -37,6 +38,7 @@ const userSchema = new mongoose.Schema({
     type: Date,
     default: Date.now,
   },
+
   bots: [
     {
       type: mongoose.Schema.Types.ObjectId,
@@ -44,7 +46,15 @@ const userSchema = new mongoose.Schema({
       default: [],
     },
   ],
-  // Optional: Add preferences or settings if needed
+  // New fields for user context
+  displayName: {
+    type: String,
+    trim: true,
+  },
+  preferences: {
+    type: [String], // Array to store multiple preferences (e.g., ["tech", "gaming"])
+    default: [],
+  },
 });
 
 // Assign default bots before saving a new user
