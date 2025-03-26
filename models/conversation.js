@@ -31,6 +31,23 @@ const conversationSchema = new mongoose.Schema(
       type: Date,
       default: Date.now,
     },
+    sessions: [
+      {
+        sessionId: { type: String, required: true, default: () => uuidv4() },
+        messages: [
+          {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "Message",
+          },
+        ],
+        summary: String,
+        startTime: { type: Date, default: Date.now },
+        endTime: Date,
+        isActive: { type: Boolean, default: true },
+      },
+    ],
+    historicalSummaries: [String], // For long-term context
+    lastActivity: { type: Date, default: Date.now },
   },
   {
     timestamps: true,

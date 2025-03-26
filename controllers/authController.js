@@ -144,5 +144,46 @@ exports.me = async (req, res) => {
     res.status(500).json({ error: error.message });
   }
 };
+exports.update = async (req, res) => {
+  try {
+    const { description, preferences } = req.body;
 
+    // Basic validation for required fields
+    if (!description || !preferences) {
+      return res
+        .status(400)
+        .json({ error: "Description and preferences are required" });
+    }
 
+    // Construct update data
+    const updateData = {
+      about: description,
+      preferences: JSON.parse(preferences), // If preferences is sent as a JSON string
+    };
+
+    // Add avatar path only if file exists
+    if (req.file) {
+      updateData.avatar = `/uploads/avatars/${req.file.filename}`;
+    }
+
+    // Update user
+    const updatedUser = await User.findByIdAndUpdate(req.user._id, updateData, {
+      new: true,
+      runValidators: true, // Validate against schema
+    });
+
+    if (!updatedUser) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    res.status(200).json({
+      message: "Profile updated successfully",
+      user: updatedUser,
+    });
+  } catch (error) {
+    console.error("Update error:", error);
+    res.status(500).json({
+      error: error.message || "Server error during profile update",
+    });
+  }
+};

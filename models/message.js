@@ -31,6 +31,7 @@ const baseMessageSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    sessionId: { type: String, required: true },
   },
   { discriminatorKey: "type" }
 );

@@ -30,6 +30,10 @@ const userSchema = new mongoose.Schema({
     type: String,
     default: "default-avatar.png",
   },
+  about: {
+    type: String,
+    default: "",
+  },
   createdAt: {
     type: Date,
     default: Date.now,

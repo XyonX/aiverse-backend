@@ -77,6 +77,11 @@ const botSchema = new mongoose.Schema({
     enum: ["general", "role-playing", "specialized"],
     default: "general",
   },
+  sessionSettings: {
+    timeout: { type: Number, default: 6 }, // Hours of inactivity
+    maxSummaryLength: { type: Number, default: 200 }, // Characters
+    maxHistorySessions: { type: Number, default: 3 }, // How many past summaries to keep
+  },
 });
 
 // module.exports = mongoose.model("Bot", botSchema, "aiverse-bot");
