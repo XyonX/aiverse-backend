@@ -2,7 +2,7 @@ const express = require("express");
 const router = express.Router();
 const authController = require("../controllers/authController");
 const { verifyToken } = require("../middleware/auth");
-const processProfileData = require("../middleware/processprofiledata");
+const processProfileData = require("../middleware/processProfileData");
 
 router.post("/register", authController.register);
 router.post("/login", authController.login);

@@ -145,11 +145,16 @@ exports.me = async (req, res) => {
   }
 };
 exports.update = async (req, res) => {
+  console.log("Update request received for user:", req.user._id);
   try {
     const { description, preferences } = req.body;
+    console.log("Request body:", { description, preferences });
 
     // Basic validation for required fields
     if (!description || !preferences) {
+      console.warn(
+        "Missing required fields. Description or preferences not provided."
+      );
       return res
         .status(400)
         .json({ error: "Description and preferences are required" });
@@ -164,7 +169,12 @@ exports.update = async (req, res) => {
     // Add avatar path only if file exists
     if (req.file) {
       updateData.avatar = `/uploads/avatars/${req.file.filename}`;
+      console.log("Avatar file detected:", req.file.filename);
+    } else {
+      console.log("No avatar file provided.");
     }
+
+    console.log("Update data being used:", updateData);
 
     // Update user
     const updatedUser = await User.findByIdAndUpdate(req.user._id, updateData, {
@@ -173,9 +183,11 @@ exports.update = async (req, res) => {
     });
 
     if (!updatedUser) {
+      console.error("User not found for update:", req.user._id);
       return res.status(404).json({ error: "User not found" });
     }
 
+    console.log("User updated successfully:", updatedUser);
     res.status(200).json({
       message: "Profile updated successfully",
       user: updatedUser,
