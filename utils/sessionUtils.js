@@ -83,6 +83,8 @@ async function getOrCreateActiveSession(conversation) {
     console.log(
       `[INFO] Session ${activeSession.sessionId} expired (${timeSinceLastActivity}ms > ${SESSION_TIMEOUT}ms timeout)`
     );
+    // Session expired - close it
+    await closeSession(conversation, activeSession);
   }
 
   const generatedId = uuidv4();
@@ -105,41 +107,17 @@ async function getOrCreateActiveSession(conversation) {
 }
 
 async function closeSession(conversation, session) {
-  console.log(
-    `[INFO] Closing session ${session.sessionId} for conversation ${conversation._id}`
-  );
   session.isActive = false;
   session.endTime = new Date();
 
   // Generate summary only if there are messages
   if (session.messages.length > 0) {
-    console.log(
-      `[DEBUG] Processing ${session.messages.length} messages for summary`
-    );
     const messages = await Message.find({ _id: { $in: session.messages } });
     session.summary = await generateSummary(messages);
-    console.log(
-      `[INFO] Generated session summary: ${session.summary.substring(0, 50)}...`
-    );
     conversation.historicalSummaries.push(session.summary);
   }
 
-  try {
-    console.log(
-      `[DEBUG] Saving closed session for conversation ${conversation._id}`
-    );
-    await conversation.save();
-    console.log(`[INFO] Successfully closed session ${session.sessionId}`);
-  } catch (saveError) {
-    console.error(
-      `[ERROR] Failed to save closed session: ${saveError.message}`,
-      {
-        conversationId: conversation._id,
-        sessionId: session.sessionId,
-      }
-    );
-    throw saveError;
-  }
+  await conversation.save();
 }
 
 async function addMessagesToConversation(conversation, messageIds) {

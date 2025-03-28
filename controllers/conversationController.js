@@ -9,7 +9,8 @@ exports.getUserConversations = async (req, res) => {
       .populate("bot")
       .populate({
         path: "messages",
-        options: { sort: { timestamp: 1 }, limit: 1 },
+        match: { isTemporary: false }, // Only include non-temporary messages
+        options: { sort: { timestamp: -1 }, limit: 20 },
       })
       .sort({ lastMessageTimestamp: -1 });
 
