@@ -127,9 +127,11 @@ exports.me = async (req, res) => {
     const sanitizedUser = {
       _id: user._id,
       username: user.username,
-      email: user.email,
+      email: user.email, //doont send this
       avatar: user.avatar,
+      about: user.about,
       bots: user.bots,
+      favouriteBots: user.favouriteBots,
       preferences: user.preferences,
       createdAt: user.createdAt,
     };

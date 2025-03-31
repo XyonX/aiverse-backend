@@ -1,21 +1,29 @@
 const conversation = require("../models/conversation");
 const { v4: uuidv4 } = require("uuid");
+const Message = require("../models/message");
+const { OpenAI } = require("openai"); // Example using OpenAI
+const { Messages } = require("openai/resources/beta/threads/messages");
 
 //2 hour in ms
 const SESSION_TIMEOUT = 2 * 60 * 60 * 1000;
 
-async function generateSummary(messages) {
+async function generateLLMResponse() {}
+
+async function generateSummary(messages, bot) {
   console.log(
     `[DEBUG] Starting summary generation for ${messages.length} messages`
   );
   // Sort messages chronologically and extract text content
   const sortedMessages = messages
     .sort((a, b) => new Date(a.timestamp.$date) - new Date(b.timestamp.$date))
-    .map((msg) => `${msg.sender}: ${msg.textContent}`);
+    .map(
+      (msg) =>
+        `${msg.sender === "bot" ? "assistant" : "user"}: ${msg.textContent}`
+    );
 
   // Prepare conversation history for the LLM
   const conversationHistory = sortedMessages.join("\n");
-
+  console.log("Generatign summary for this message ", conversationHistory);
   let openai = new OpenAI({
     apiKey: process.env.OPENROUTER_API,
     baseURL: "https://openrouter.ai/api/v1",
@@ -26,7 +34,7 @@ async function generateSummary(messages) {
       `[INFO] Calling OpenAI for summary (${sortedMessages.length} messages)`
     );
     const completion = await openai.chat.completions.create({
-      model: "gpt-3.5-turbo",
+      model: "deepseek/deepseek-v3-base:free",
       messages: [
         {
           role: "system",
@@ -113,7 +121,9 @@ async function closeSession(conversation, session) {
   // Generate summary only if there are messages
   if (session.messages.length > 0) {
     const messages = await Message.find({ _id: { $in: session.messages } });
-    session.summary = await generateSummary(messages);
+    const bot = conversation.bot;
+    session.summary = await generateSummary(messages, bot);
+    console.log("Generated summary ", session.summary);
     conversation.historicalSummaries.push(session.summary);
   }
 

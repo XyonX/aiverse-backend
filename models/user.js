@@ -50,6 +50,14 @@ const userSchema = new mongoose.Schema({
       default: [],
     },
   ],
+  favouriteBots: [
+    {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Bot",
+      default: [],
+    },
+  ],
+
   // New fields for user context
   displayName: {
     type: String,
