@@ -43,8 +43,16 @@ exports.getBots = async (req, res) => {
 
 exports.addBot = async (req, res) => {
   try {
-    const { name, apiKey, endpoint, model, context, category, isDefault } =
-      req.body;
+    const {
+      name,
+      apiKey,
+      endpoint,
+      model,
+      context,
+      category,
+      isDefault,
+      specification,
+    } = req.body;
 
     console.log("Received apiKey:", apiKey); // Debugging
     console.log(Buffer.from(process.env.ENCRYPTION_KEY).length);
@@ -64,6 +72,7 @@ exports.addBot = async (req, res) => {
       category,
       owner: req.user?.id || null,
       isDefault,
+      specification,
     });
     await newBot.save();
     res.status(201).json(newBot);

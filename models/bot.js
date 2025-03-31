@@ -18,6 +18,7 @@ const botSchema = new mongoose.Schema({
   model: {
     type: String,
     required: true,
+    unique: true,
   },
   avatar: {
     type: String,
@@ -31,6 +32,8 @@ const botSchema = new mongoose.Schema({
     type: Boolean,
     default: false,
   },
+  isOnline: { type: Boolean, default: false }, // Indicates if the bot is online
+  lastOnline: { type: Date, default: Date.now }, // Last time bot was online
   streamingEnabled: {
     type: Boolean,
     default: false,
@@ -81,6 +84,32 @@ const botSchema = new mongoose.Schema({
     timeout: { type: Number, default: 6 }, // Hours of inactivity
     maxSummaryLength: { type: Number, default: 200 }, // Characters
     maxHistorySessions: { type: Number, default: 3 }, // How many past summaries to keep
+  },
+  specification: {
+    context: {
+      type: Number,
+      required: true,
+    },
+    maxOutput: {
+      type: Number,
+      required: true,
+    },
+    inputCost: {
+      type: Number,
+      default: 0,
+    },
+    outputCost: {
+      type: Number,
+      default: 0,
+    },
+    latency: {
+      // Changed to camelCase (recommended convention)
+      type: Number,
+      default: 1.36, // Fixed typo 'defalt' -> 'default'
+    },
+    throughput: {
+      type: Number,
+    },
   },
 });
 
