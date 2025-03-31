@@ -86,18 +86,22 @@ const botSchema = new mongoose.Schema({
     maxHistorySessions: { type: Number, default: 3 }, // How many past summaries to keep
   },
   specification: {
+    //input token capacity of the modle
     context: {
       type: Number,
       required: true,
     },
+    //output caparcity or max toke generation
     maxOutput: {
       type: Number,
       required: true,
     },
+    //  cost per m input token
     inputCost: {
       type: Number,
       default: 0,
     },
+    //cost per m output token
     outputCost: {
       type: Number,
       default: 0,
@@ -111,6 +115,45 @@ const botSchema = new mongoose.Schema({
       type: Number,
     },
   },
+  messageTokenLimit: {
+    type: Number,
+    default: 10000,
+  },
+});
+
+// botSchema.pre("save", function (next) {
+//   const twentyPercent = this.specification.context * 0.2;
+//   const MIN_TOKENS = 1000;
+
+//   // MAX_TOKENS is the smaller of (10,000 or the model’s context)
+//   const MAX_TOKENS = Math.min(10000, this.specification.context);
+
+//   // Clamp between MIN and MAX
+//   this.messageTokenLimit = Math.min(
+//     Math.max(twentyPercent, MIN_TOKENS),
+//     MAX_TOKENS
+//   );
+
+//   next();
+// });
+botSchema.pre("save", function (next) {
+  const context = this.specification.context; // Model’s total token capacity
+  const twentyPercent = context * 0.2;
+
+  // Determine the base limit based on context size
+  let baseLimit;
+  if (context >= 10000) {
+    // For large models: use 20% if >=10k, else default to 10k
+    baseLimit = Math.max(twentyPercent, 10000);
+  } else {
+    // For smaller models: use 20% but never less than 1k
+    baseLimit = Math.max(twentyPercent, 1000);
+  }
+
+  // Ensure the limit does not exceed the model’s actual capacity
+  this.messageTokenLimit = Math.min(baseLimit, context);
+
+  next();
 });
 
 // module.exports = mongoose.model("Bot", botSchema, "aiverse-bot");
