@@ -5,46 +5,10 @@ const { OpenAI } = require("openai"); // Example using OpenAI
 const { Messages } = require("openai/resources/beta/threads/messages");
 const { Tiktoken } = require("tiktoken/lite");
 const cl100k_base = require("tiktoken/encoders/cl100k_base.json");
+const removeMd = require("remove-markdown");
 
-//some bot param
-/*
-  specification: {
-    //input token capacity of the modle
-    context: {
-      type: Number,
-      required: true,
-    },
-    //output caparcity or max toke generation
-    maxOutput: {
-      type: Number,
-      required: true,
-    },
-    //  cost per m input token
-    inputCost: {
-      type: Number,
-      default: 0,
-    },
-    //cost per m output token
-    outputCost: {
-      type: Number,
-      default: 0,
-    },
-    latency: {
-      // Changed to camelCase (recommended convention)
-      type: Number,
-      default: 1.36, // Fixed typo 'defalt' -> 'default'
-    },
-    throughput: {
-      type: Number,
-    },
-  },
-  messageTokenLimit: {
-    type: Number,
-    default: 10000,
-  },
-*/
 //2 hour in ms
-const SESSION_TIMEOUT = 2 * 60 * 60 * 1000;
+const SESSION_TIMEOUT = 6 * 60 * 60 * 1000;
 
 const calculateMessageToken = (message) => {
   const encoding = new Tiktoken(
@@ -58,29 +22,56 @@ const calculateMessageToken = (message) => {
 };
 
 const generateLLMResponse = async (messages, maxToken) => {
+  // const prompt = {
+  //   role: "user",
+  //   content: `Summarize this conversation into 3-8 key points. Follow these rules:
+  //   - 1 user point → 1 assistant summary (paired)
+  //   - Use "user" for original requests and "assistant" for summarized answers
+  //   - Maximum 10 objects (5 user/assistant pairs)
+  //   - Keep "content" under 2 sentences
+  //   - Stay within ${maxToken} tokens total
+
+  //   Example output:
+  //   ${JSON.stringify(
+  //     [
+  //       { role: "user", content: "Asked about quantum computing applications" },
+  //       {
+  //         role: "assistant",
+  //         content: "Explained current uses in finance and drug discovery",
+  //       },
+  //     ],
+  //     null,
+  //     2
+  //   )}
+
+  //   Conversation to summarize:
+  //   ${JSON.stringify(messages, null, 2)}`,
+  // };
   const prompt = {
     role: "user",
-    content: `Summarize this conversation into 3-8 key points. Follow these rules:
+    content: `ONLY output a JSON array with conversation summary. STRICTLY follow:
+    - Start with [ and end with ]
+    - No text/comments outside the array
     - 1 user point → 1 assistant summary (paired)
-    - Use "user" for original requests and "assistant" for summarized answers
-    - Maximum 10 objects (5 user/assistant pairs)
-    - Keep "content" under 2 sentences
-    
-    Example output: 
-    ${JSON.stringify(
-      [
-        { role: "user", content: "Asked about quantum computing applications" },
-        {
-          role: "assistant",
-          content: "Explained current uses in finance and drug discovery",
-        },
-      ],
-      null,
-      2
-    )}
-    
+    - Use "user"/"assistant" roles
+    - Max 10 objects (5 pairs)
+    - Keep content under 2 sentences
+    - Stay within ${maxToken} tokens
+  
+    Example output ONLY: 
+    [
+      {"role": "user", "content": "Topic question"},
+      {"role": "assistant", "content": "Summary response"}
+    ]
+  
     Conversation to summarize:
-    ${JSON.stringify(messages, null, 2)}`,
+    ${JSON.stringify(messages, null, 2)}
+  
+    REMINDERS:
+    - Your response must be ONLY valid JSON starting with [ 
+    - No extra text before/after the array
+    - Never use markdown or code blocks
+    - Never explain your response`,
   };
 
   let openai = new OpenAI({
@@ -91,7 +82,7 @@ const generateLLMResponse = async (messages, maxToken) => {
 
   try {
     const completion = await openai.chat.completions.create({
-      model: "deepseek/deepseek-v3-base:free",
+      model: "deepseek/deepseek-chat-v3-0324:free",
       messages: [prompt],
       temperature: 0.3,
       max_tokens: maxToken,
@@ -108,7 +99,9 @@ const generateLLMResponse = async (messages, maxToken) => {
 };
 
 async function generateSummary(messages, maxToken) {
-  const summaryString = generateLLMResponse(messages, maxToken);
+  console.log("max token receiverd", maxToken);
+  const summaryString = await generateLLMResponse(messages, maxToken);
+  console.log("generated summary", summaryString);
   //converting into array for storing in the db
   const result = JSON.parse(summaryString);
   return result;
@@ -125,6 +118,8 @@ function calculateTokenAllocation(bot) {
   // Minimum thresholds (adjust based on your needs)
   const MIN_SESSION_TOKENS = 10000; // Minimum 10k for session context
   const MIN_HISTORY_TOKENS = 2000; // Minimum 2k for historical context
+  const MIN_SUMMARY_TOKENS = 500; // Minimum for a summary
+  const MAX_SUMMARY_TOKENS = 4000; // Maximum for a summary (per your example)
 
   // Calculate allocations
   let sessionTokens = Math.floor(remainingTokens * sessionPercent);
@@ -139,20 +134,34 @@ function calculateTokenAllocation(bot) {
     );
   }
 
-  // Ensure we don't exceed remaining tokens
+  // Ensure we don’t exceed remaining tokens
   if (sessionTokens + historyTokens > remainingTokens) {
     const excess = sessionTokens + historyTokens - remainingTokens;
     historyTokens = Math.max(historyTokens - excess, MIN_HISTORY_TOKENS);
   }
 
+  // Calculate summary token length (30% of sessionTokens)
+  let summarizeTokenLength = Math.floor(sessionTokens * 0.2);
+  // Enforce min and max for summary token length
+  summarizeTokenLength = Math.max(
+    MIN_SUMMARY_TOKENS,
+    Math.min(summarizeTokenLength, MAX_SUMMARY_TOKENS)
+  );
+
+  // Calculate how many past sessions can fit in historyTokens
+  const maxPastSessions = Math.floor(historyTokens / summarizeTokenLength);
+
   return {
-    sessionTokens,
-    historyTokens,
-    messageTokenLimit,
+    sessionTokens, // Tokens for current session context
+    historyTokens, // Tokens for historical summaries
+    messageTokenLimit, // Reserved tokens (e.g., for current message)
+    summarizeTokenLength, // Max tokens per summary (exported as requested)
+    maxPastSessions, // Number of past sessions that can be included
   };
 }
 
-async function getOrCreateActiveSession(conversation, bot) {
+async function getOrCreateActiveSession(conversation) {
+  const bot = conversation.bot;
   const { sessionTokens, historyTokens, messageTokenLimit } =
     calculateTokenAllocation(bot);
 
@@ -194,15 +203,14 @@ async function getOrCreateActiveSession(conversation, bot) {
 
   // Create new session
   const newSession = new Session({
-    sessionId: generatedId,
-    messages: [],
-    summary: null,
+    sessionId: uuidv4(),
+    conversation: conversation._id,
     startTime: now,
-    endTime: null,
     isActive: true,
+    tokenCount: 0,
   });
 
-  await newSession.save({ session });
+  await newSession.save();
   conversation.activeSession = newSession._id;
   conversation.sessions.push(newSession._id);
   await conversation.save();
@@ -213,78 +221,171 @@ async function getOrCreateActiveSession(conversation, bot) {
 async function closeSession(conversation, session) {
   session.isActive = false;
   session.endTime = new Date();
-
-  // Generate summary only if there are messages
   if (session.sessionContext.length > 0) {
-    // const messages = await Message.find({ _id: { $in: session.messages } });
-    const bot = conversation.bot;
+    const { summarizeTokenLength } = calculateTokenAllocation(conversation.bot);
     session.summary = await generateSummary(
       session.sessionContext,
-      sessionTokens
+      summarizeTokenLength
     );
-    console.log("Generated summary ", session.summary);
+    console.log(
+      `Summargy geenrated for  ${session.sessionContext.length} seassion messages at ${summarizeTokenLength} token limit `
+    );
   }
-
-  await conversation.save();
+  await session.save();
 }
 
+// async function addMessagesToConversation(conversation, messageIds) {
+//   // console.log(
+//   //   `[DEBUG] Adding messages ${messageIds.join(", ")} to conversation ${
+//   //     conversation._id
+//   //   }`
+//   // );
+//   // try {
+//   //   // Get or create active session (handles expiration checks)
+//   //   const activeSession = await getOrCreateActiveSession(conversation);
+//   //   const { sessionTokens } = calculateTokenAllocation(conversation.bot);
+//   //   let tokenCount = activeSession.tokenCount;
+//   //   const messages = await Message.find({ _id: { $in: messageIds } }).exec();
+//   //   const formattedMessages = messages.map((message) => {
+//   //     const cleanMessage = removeMd(message.textContent);
+//   //     const messageToken = calculateMessageToken(cleanMessage);
+//   //     tokenCount = tokenCount + messageToken;
+//   //     return {
+//   //       role: message.sender === "bot" ? "assistant" : "user", // Fixed spelling
+//   //       content: cleanMessage
+//   //         .replace(/[\u{1F600}-\u{1F6FF}]/gu, "") // Remove all emojis
+//   //         .replace(/\\n/g, " ") // Convert newlines to spaces
+//   //         .replace(/\\"/g, '"') // Fix escaped quotes
+//   //         .slice(0, 300), // Clean truncation,
+//   //     };
+//   //   });
+//   //   activeSession.tokenCount = tokenCount;
+//   //   // Update session's messages array with all message IDs
+//   //   activeSession.sessionContext.push(...formattedMessages);
+//   //   // Update timestamps
+//   //   conversation.lastMessageTimestamp = new Date();
+//   //   conversation.lastActivity = new Date();
+//   //   // Save all changes in a single operation
+//   //   await conversation.save();
+//   //   console.log(
+//   //     `[INFO] Successfully added messages ${messageIds.join(
+//   //       ", "
+//   //     )} to conversation ${conversation._id} and session ${
+//   //       activeSession.sessionId
+//   //     }`
+//   //   );
+//   //   return conversation;
+//   // } catch (error) {
+//   //   console.error(`[ERROR] Failed to add messages:`, error.message);
+//   //   throw new Error(`Message addition failed: ${error.message}`);
+//   // }
+// }
 async function addMessagesToConversation(conversation, messageIds) {
   console.log(
-    `[DEBUG] Adding messages ${messageIds.join(", ")} to conversation ${
-      conversation._id
-    }`
+    `[addMessagesToConversation] Starting process for conversation ${conversation._id} with ${messageIds.length} message(s)`
   );
+  console.debug(`Message IDs: ${JSON.stringify(messageIds)}`);
 
   try {
-    // Get or create active session (handles expiration checks)
-    const activeSession = await getOrCreateActiveSession(conversation);
+    // Session management
+    console.log(
+      `[Session] Getting or creating active session for conversation ${conversation._id}`
+    );
+    const activeSession = await getOrCreateActiveSession(
+      conversation,
+      conversation.bot
+    );
+    console.log(
+      `[Session] Active session ${activeSession._id} found with ${activeSession.tokenCount} tokens`
+    );
 
-    // Update conversation's messages array with all message IDs
-    conversation.messages.push(...messageIds);
-
-    // Fetch all messages where _id is in the messageIds array
-    const messages = await Message.find({
-      _id: { $in: messageIds },
-    }).exec();
-
+    const { sessionTokens } = calculateTokenAllocation(conversation.bot);
+    console.log(`[Token] Session token limit: ${sessionTokens}`);
     let tokenCount = activeSession.tokenCount;
+    console.log(`[Token] Current token count: ${tokenCount}`);
 
-    const formattedMessages = messages.map((message) => {
-      const cleanMessage = removeMd(message.textContent);
+    // Fetch messages
+    console.log(
+      `[Message] Fetching ${messageIds.length} messages from database`
+    );
+    const messages = await Message.find({ _id: { $in: messageIds } }).exec();
+    console.log(`[Message] Retrieved ${messages.length} messages`);
+
+    // Process each message
+    for (const [index, message] of messages.entries()) {
+      console.log(
+        `[Processing] Message ${index + 1}/${messages.length} (ID: ${
+          message._id
+        })`
+      );
+
+      // Clean message content
+      const cleanMessage = message.textContent
+        .replace(/[\u{1F600}-\u{1F6FF}]/gu, "")
+        .replace(/\\n/g, " ")
+        .replace(/\\"/g, '"');
+      console.debug(
+        `[Content] Original: ${message.textContent.substring(
+          0,
+          50
+        )}... | Cleaned: ${cleanMessage.substring(0, 50)}...`
+      );
+
+      // Token calculation
       const messageToken = calculateMessageToken(cleanMessage);
-      tokenCount = tokenCount + messageToken;
-      return {
-        role: message.sender === "bot" ? "assistant" : "user", // Fixed spelling
-        content: cleanMessage
-          .replace(/[\u{1F600}-\u{1F6FF}]/gu, "") // Remove all emojis
-          .replace(/\\n/g, " ") // Convert newlines to spaces
-          .replace(/\\"/g, '"') // Fix escaped quotes
-          .slice(0, 300), // Clean truncation,
-      };
-    });
+      console.log(
+        `[Token] Message tokens: ${messageToken} | Current total: ${tokenCount}`
+      );
+
+      // Session token management
+      if (tokenCount + messageToken > sessionTokens) {
+        console.log(
+          `[Token] Exceeding limit (${
+            tokenCount + messageToken
+          } > ${sessionTokens}). Creating new session.`
+        );
+        await closeSession(conversation, activeSession);
+        const newSession = await getOrCreateActiveSession(
+          conversation,
+          conversation.bot
+        );
+        console.log(`[Session] New session created: ${newSession._id}`);
+
+        activeSession.sessionContext = [];
+        activeSession.tokenCount = 0;
+        tokenCount = 0;
+        console.log(`[Token] Token count reset to 0`);
+      }
+
+      // Add message to context
+      const role = message.sender === "bot" ? "assistant" : "user";
+      activeSession.sessionContext.push({ role, content: cleanMessage });
+      tokenCount += messageToken;
+      console.log(
+        `[Context] Added message as ${role} | New token count: ${tokenCount}`
+      );
+    }
+
+    // Final updates
     activeSession.tokenCount = tokenCount;
-
-    // Update session's messages array with all message IDs
-    activeSession.sessionContext.push(...formattedMessages);
-
-    // Update timestamps
+    conversation.messages.push(...messageIds);
     conversation.lastMessageTimestamp = new Date();
     conversation.lastActivity = new Date();
 
-    // Save all changes in a single operation
+    console.log(`[Save] Saving session and conversation updates`);
+    await activeSession.save();
     await conversation.save();
 
     console.log(
-      `[INFO] Successfully added messages ${messageIds.join(
-        ", "
-      )} to conversation ${conversation._id} and session ${
-        activeSession.sessionId
-      }`
+      `[Success] Added ${messages.length} messages to conversation ${conversation._id}`
     );
     return conversation;
   } catch (error) {
-    console.error(`[ERROR] Failed to add messages:`, error.message);
-    throw new Error(`Message addition failed: ${error.message}`);
+    console.error(
+      `[Error] Failed to add messages to conversation ${conversation._id}:`,
+      error
+    );
+    throw error; // Re-throw to allow handling by caller
   }
 }
 
@@ -292,4 +393,6 @@ module.exports = {
   getOrCreateActiveSession,
   addMessagesToConversation,
   closeSession,
+  calculateTokenAllocation,
+  calculateMessageToken,
 };

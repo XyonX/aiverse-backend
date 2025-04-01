@@ -13,6 +13,7 @@ const sessionSchema = mongoose.Schema({
   summary: [
     // For AI context
     {
+      _id: false, // Disable automatic _id for summary items
       role: {
         type: String,
         enum: ["system", "user", "assistant"],
@@ -26,6 +27,7 @@ const sessionSchema = mongoose.Schema({
   //should be added to all message context
   sessionContext: [
     {
+      _id: false, // Disable automatic _id for context items
       role: {
         type: String,
         enum: ["system", "user", "assistant"],

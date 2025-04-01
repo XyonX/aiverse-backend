@@ -4,13 +4,15 @@
   "main": "server.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "node server.js"
+    "start": "node server.js",
+    "dev": "nodemon server.js"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "description": "",
   "dependencies": {
+    "@dqbd/tiktoken": "^1.0.20",
     "axios": "^1.8.1",
     "bcrypt": "^5.1.1",
     "cookie-parser": "^1.4.7",
@@ -23,6 +25,10 @@
     "multer": "^1.4.5-lts.1",
     "openai": "^4.86.2",
     "path": "^0.12.7",
+    "remove-markdown": "^0.6.0",
     "tiktoken": "^1.0.20"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.9"
   }
 }

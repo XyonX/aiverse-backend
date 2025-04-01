@@ -1,7 +1,7 @@
 //messageController.js
 const Message = require("../models/message");
 const User = require("../models/user");
-const Conversation = require("../models/conversation");
+const { Conversation } = require("../models/conversation");
 const { OpenAI } = require("openai"); // Example using OpenAI
 const { decrypt } = require("../utils/encryption");
 const fs = require("fs");
@@ -9,6 +9,15 @@ const appContext = JSON.parse(
   fs.readFileSync("./context/appContext.json", "utf8")
 );
 const sessionUtils = require("../utils/sessionUtils");
+const encoding_for_model = require("@dqbd/tiktoken").encoding_for_model;
+
+const calculateMessageToken = (message) => {
+  const encoder = encoding_for_model("gpt-3.5-turbo");
+
+  const tokens = encoder.encode(message);
+  encoder.free();
+  return tokens.length;
+};
 
 // Helper function to format file size
 function formatSize(bytes) {
@@ -85,17 +94,91 @@ async function prepareSystemContext(userId, conversation) {
   };
 }
 
-async function buildChatContext(conversation, currentMessageId) {
+async function buildChatContext(conversation) {
+  console.log("Starting to build chat context...");
+
+  const { historyTokens, maxPastSessions } =
+    sessionUtils.calculateTokenAllocation(conversation.bot);
+  console.log(
+    `Token allocation - historyTokens: ${historyTokens}, maxPastSessions: ${maxPastSessions}`
+  );
+
+  const closedSessions = conversation.sessions
+    .filter((s) => !s.isActive)
+    .sort((a, b) => new Date(a.endTime) - new Date(b.endTime))
+    .slice(-maxPastSessions);
+  console.log(`Found ${closedSessions.length} closed sessions to include`);
+
+  // Collect all summary messages in order
+  const historicalContext = closedSessions.flatMap(
+    (session) => session.summary || []
+  );
+  console.log(
+    `Collected ${historicalContext.length} historical context messages`
+  );
+
+  let tokenCount = historicalContext.reduce(
+    (sum, msg) => sum + calculateMessageToken(msg.content),
+    0
+  );
+  console.log(`Initial historical context token count: ${tokenCount}`);
+
+  while (tokenCount > historyTokens && historicalContext.length > 0) {
+    const removedMsg = historicalContext.shift();
+    const removedTokens = calculateMessageToken(removedMsg.content);
+    tokenCount -= removedTokens;
+    console.log(
+      `Removed message with ${removedTokens} tokens (new total: ${tokenCount})`
+    );
+  }
+
+  // Find the current active session
+  const currentSession = conversation.sessions.find((s) => s.isActive);
+  console.log(
+    currentSession ? "Found active session" : "No active session found"
+  );
+
+  // Get its sessionContext, default to empty array if no active session
+  const currentContext = currentSession ? currentSession.sessionContext : [];
+  console.log(`Current session has ${currentContext.length} context messages`);
+
+  // Combine historical summaries and current session context
+  const context = [...historicalContext, ...currentContext];
+  console.log(`Final context built with ${context.length} total messages`);
+
+  return context;
+}
+
+async function buildChatContext1(conversation, currentMessageId) {
   const context = [];
   const currentSession = conversation.sessions.find((s) => s.isActive);
 
-  // Add historical summaries
-  context.push(
-    ...conversation.historicalSummaries.map((summary) => ({
-      role: "system",
-      content: `Previous conversation summary: ${summary}`,
-    }))
-  );
+  // // Add historical summaries
+  // context.push(
+  //   ...conversation.historicalSummaries.map((summary) => ({
+  //     role: "system",
+  //     content: `Previous conversation summary: ${summary}`,
+  //   }))
+  // );
+  //we need to take recently closed 10 session excluding the current one  whihc one is active
+  //from that 10 session we need to take all the message summary array in this format
+  //  summary: [
+  //   // For AI context
+  //   {
+  //     role: {
+  //       type: String,
+  //       enum: ["system", "user", "assistant"],
+  //     },
+  //     content: String,
+  //   },
+  // ],
+  //and add it in the contexct
+  //so that theold message is added ifrst or the new one whhc is preffered by the llm
+  //then we need to tkae the currentsession.sessionContext and we need to append all the objectsd from it
+  // ite should be in order like ad the ollder message in those 10 session sumary array
+  //and the active sessoon sessionContext is contianing most recent message so the  context var should contian all of this in order
+  //here i had a previouis implemntaton
+  //you  have to fix it accoridn tot hte new conversation schema and sessio nshcmea
 
   // Add current session messages (excluding current message)
   if (currentSession) {
@@ -145,6 +228,7 @@ async function handleStreamingResponse({
 
   let botMessage;
   try {
+    // Create temporary bot message first
     botMessage = new Message.Text({
       conversation: conversationId,
       sender: "bot",
@@ -153,21 +237,19 @@ async function handleStreamingResponse({
       sessionId: session.sessionId,
     });
     await botMessage.save();
+
+    // Add user message to conversation immediately
+    await sessionUtils.addMessagesToConversation(conversation, [
+      userMessage._id,
+    ]);
+    console.log(
+      `[Streaming] Added user message ${userMessage._id} to conversation`
+    );
   } catch (botMessageError) {
-    console.error("[Streaming] Bot message creation failed:", botMessageError);
+    console.error("[Streaming] Initial setup failed:", botMessageError);
     await userMessage.remove();
     return res.status(500).json({ message: "Failed to initialize response" });
   }
-
-  // await conversation.findByIdAndUpdate(conversationId, {
-  //   $push: { messages: { $each: [userMessage._id, botMessage._id] } },
-  //   $set: { lastMessageTimestamp: new Date() },
-  // });
-
-  await sessionUtils.addMessagesToConversation(conversation, [
-    userMessage._id,
-    botMessage._id,
-  ]);
 
   res.write(
     `data: ${JSON.stringify({ type: "init", userMessage, botMessage })}\n\n`
@@ -181,10 +263,19 @@ async function handleStreamingResponse({
       stream: true,
     });
 
+    let firstContentReceived = false;
+
     for await (const chunk of stream) {
       if (chunk.choices?.[0]?.delta?.content) {
         const contentChunk = chunk.choices[0].delta.content;
-        botMessage.textContent += contentChunk;
+
+        // Remove placeholder on first content
+        if (!firstContentReceived) {
+          botMessage.textContent = contentChunk;
+          firstContentReceived = true;
+        } else {
+          botMessage.textContent += contentChunk;
+        }
         await botMessage.save();
         res.write(
           `data: ${JSON.stringify({
@@ -196,15 +287,25 @@ async function handleStreamingResponse({
     }
 
     botMessage.isTemporary = false;
-    botMessage.textContent = botMessage.textContent.replace(
-      /^PLACEHOLDER\s*/,
-      ""
-    );
+
+    console.log("Accumulated final bot response:", botMessage.textContent);
     await botMessage.save();
+
+    // Add bot message to conversation after successful streaming
+    await sessionUtils.addMessagesToConversation(conversation, [
+      botMessage._id,
+    ]);
+    console.log(
+      `[Streaming] Added bot message ${botMessage._id} to conversation`
+    );
     res.write(`data: ${JSON.stringify({ type: "complete", botMessage })}\n\n`);
   } catch (streamError) {
     console.error("[Streaming] Error:", streamError);
-    await Promise.all([botMessage?.remove(), userMessage.remove()]);
+    // In the error handling block
+    await Promise.all([
+      botMessage?.deleteOne(), // Changed from remove()
+      userMessage.deleteOne(), // Changed from remove()
+    ]);
     res.write(
       `data: ${JSON.stringify({
         type: "error",
@@ -274,16 +375,8 @@ exports.createMessage = async (req, res) => {
 
     //001
     const conversation = await Conversation.findById(conversationId)
-      .populate("bot")
-      .populate("sessions.messages"); // ✅ Remove sorting here
-
-    // Manually sort messages inside each session
-    conversation.sessions.forEach((session) => {
-      session.messages.sort(
-        (a, b) => new Date(a.timestamp) - new Date(b.timestamp)
-      );
-    });
-    console.log("Conversation found with id ", conversation._id);
+      .populate("bot") // Populate bot details
+      .populate("sessions"); // Populate session documents
 
     if (!conversation)
       return res.status(404).json({ message: "Conversation not found" });
@@ -291,7 +384,7 @@ exports.createMessage = async (req, res) => {
     // Session management - ensure active session
     const session = await sessionUtils.getOrCreateActiveSession(conversation);
 
-    console.log("Seassion responce", session);
+    if (!session) throw new Error("Failed to get or create active session");
 
     // 1. Create and save user message
     const userMessage = await createUserMessage(
@@ -302,9 +395,6 @@ exports.createMessage = async (req, res) => {
     );
     console.log("User Messae created :", userMessage);
 
-    // Add user message to session immediately
-    //await sessionUtils.addMessageToConversation(conversation, userMessage._id);
-
     // 2. Prepare context-aware system message
     const { systemMessage, user } = await prepareSystemContext(
       userId,
@@ -312,7 +402,8 @@ exports.createMessage = async (req, res) => {
     );
 
     // 3. Build conversation context
-    const context = await buildChatContext(conversation, userMessage._id);
+    const context = await buildChatContext(conversation);
+    console.log("Final context created:", context);
 
     // 4. Prepare LLM messages array
     const llmMessages = [
@@ -320,6 +411,16 @@ exports.createMessage = async (req, res) => {
       ...context,
       { role: "user", content: userMessage.textContent },
     ];
+
+    const totalTokens = llmMessages.reduce(
+      (sum, msg) => sum + calculateMessageToken(msg.content),
+      0
+    );
+    if (totalTokens > conversation.bot.specification.context) {
+      return res.status(400).json({ message: "Message exceeds token limit" });
+    }
+    console.log("Sending message with total toke count:", totalTokens);
+    console.log("Messsage sent to llm:", llmMessages);
 
     // 5. Handle streaming response
     if (conversation.bot.streamingEnabled) {
