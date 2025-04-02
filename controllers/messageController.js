@@ -205,10 +205,17 @@ async function buildChatContext1(conversation, currentMessageId) {
 
 function createOpenAIClient(bot) {
   let openai;
+  console.log("Bot log", bot);
+
+  console.log("Encrypted api key", bot.apiKey);
 
   openai = new OpenAI({
     apiKey: decrypt(bot.apiKey),
     baseURL: bot.endpoint,
+    defaultHeaders: {
+      "HTTP-Referer": "https://aiverseapp.site/", // Optional. Site URL for rankings on openrouter.ai.
+      "X-Title": "aiverse", // Optional. Site title for rankings on openrouter.ai.
+    },
   });
   return openai;
 }
@@ -380,6 +387,8 @@ exports.createMessage = async (req, res) => {
 
     if (!conversation)
       return res.status(404).json({ message: "Conversation not found" });
+
+    console.log("Conversation data", conversation);
 
     // Session management - ensure active session
     const session = await sessionUtils.getOrCreateActiveSession(conversation);

@@ -4,109 +4,66 @@ const admin = require("../config/firebaseAdmin"); // Your initialized firebase-a
 
 exports.register = async (req, res) => {
   try {
-    console.log("Received request at /register");
-    console.log("Request body:", req.body);
+    const authHeader = req.headers.authorization;
+    const { username, email } = req.body;
 
-    const { idToken, username } = req.body;
-    console.log("Extracted idToken:", idToken);
-    console.log("Extracted username:", username);
-
-    // Verify the Firebase ID token
-    console.log("Verifying Firebase ID token...");
-    //this contains data like email,password
-    const decodedToken = await admin.auth().verifyIdToken(idToken);
-    console.log("Decoded token:", decodedToken);
-
-    const { uid, email } = decodedToken;
-    console.log("Extracted UID:", uid);
-    console.log("Extracted email:", email);
-
-    // Check if the user already exists in your MongoDB collection
-    console.log("Checking if user already exists in database...");
-    const existingUser = await User.findOne({ firebaseUid: uid });
-    if (existingUser) {
-      console.log("User already exists:", existingUser);
-      return res.status(400).json({ error: "User already exists" });
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return res.status(401).json({ error: "Missing authorization header" });
     }
 
-    // Create a new user document
+    const idToken = authHeader.split(" ")[1];
+    const firebaseUser = await admin.auth().verifyIdToken(idToken);
+
+    // Check if user already exists
+    const existingUser = await User.findOne({ firebaseUid: firebaseUser.uid });
+    if (existingUser) {
+      console.log("User already exists:", existingUser);
+      return res.status(409).json({ error: "User already exists" });
+    }
+
+    // Create a new user document in your database
     console.log("Creating new user in database...");
     const newUser = new User({
-      firebaseUid: uid,
+      firebaseUid: firebaseUser.uid,
       username,
       email,
     });
     await newUser.save();
     console.log("New user saved successfully:", newUser);
 
-    // Sanitize response
-    const sanitizedUser = {
-      _id: newUser._id,
-      username: newUser.username,
-      email: newUser.email,
-      avatar: newUser.avatar,
-      bots: newUser.bots,
-      createdAt: newUser.createdAt,
-    };
-    console.log("Sanitized user response:", sanitizedUser);
-
-    res.status(201).json({
-      message: "Registration successful",
-      user: sanitizedUser,
-    });
+    // Return only a success message
+    return res.status(201).json({ message: "Registration successful" });
   } catch (error) {
     console.error("Error during registration:", error);
-    res.status(500).json({ error: error.message });
+    return res.status(500).json({ error: error.message });
   }
 };
 
 exports.login = async (req, res) => {
   try {
-    console.log("Login request received");
-    const { idToken } = req.body;
+    const authHeader = req.headers.authorization; // Correct header reference
 
-    if (!idToken) {
-      console.error("Missing idToken in request");
-      return res.status(400).json({ error: "Missing idToken" });
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      console.log("Auth header missing or not properly formatted");
+      return res
+        .status(401)
+        .json({ error: "Missing or malformed authorization header" });
     }
-    console.log("ID Token received:", idToken);
 
-    // Verify the Firebase ID token
-    console.log("Verifying Firebase ID token...");
-    const decodedToken = await admin.auth().verifyIdToken(idToken);
-    const { uid } = decodedToken;
-    console.log("Decoded token UID:", uid);
+    const idToken = authHeader.split(" ")[1];
 
-    // Find the corresponding user in MongoDB
-    console.log("Searching for user in database...");
-    const user = await User.findOne({ firebaseUid: uid });
+    // Verify the token
+    await admin.auth().verifyIdToken(idToken);
 
-    if (!user) {
-      console.error("User not found in database");
-      return res.status(401).json({ error: "User not found" });
-    }
-    console.log("User found:", user);
-
-    // Sanitize response
-    const sanitizedUser = {
-      _id: user._id,
-      username: user.username,
-      email: user.email,
-      avatar: user.avatar,
-      bots: user.bots,
-      preferences: user.preferences,
-      createdAt: user.createdAt,
-    };
-    console.log("Sanitized user data prepared");
-
-    res.status(200).json({
-      message: "Login successful",
-      user: sanitizedUser,
-    });
-    console.log("Login successful, response sent");
+    // Token is valid, send a simple success response
+    return res
+      .status(200)
+      .json({ loggedIn: true, message: "Login successful" });
   } catch (error) {
-    console.error("Error during login:", error.message);
-    res.status(500).json({ error: error.message });
+    console.error("Error in login:", error);
+    return res
+      .status(401)
+      .json({ loggedIn: false, error: "Invalid or expired token" });
   }
 };
 
