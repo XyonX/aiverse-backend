@@ -290,3 +290,42 @@ module.exports = {
   addMessagesToConversation,
   closeSession,
 };
+
+exports.login = async (req, res) => {
+  try {
+    console.log("Login request received");
+
+    // UID comes from middleware
+    const uid = req.firebaseUid;
+
+    // Find user using UID from middleware
+    const user = await User.findOne({ firebaseUid: uid });
+
+    if (!user) {
+      console.error("User not found in database");
+      return res.status(401).json({ error: "User not found" });
+    }
+    console.log("User found:", user);
+
+    // Sanitize response
+    const sanitizedUser = {
+      _id: user._id,
+      username: user.username,
+      email: user.email,
+      avatar: user.avatar,
+      bots: user.bots,
+      preferences: user.preferences,
+      createdAt: user.createdAt,
+    };
+    console.log("Sanitized user data prepared");
+
+    res.status(200).json({
+      message: "Login successful",
+      user: sanitizedUser,
+    });
+    console.log("Login successful, response sent");
+  } catch (error) {
+    console.error("Error during login:", error.message);
+    res.status(500).json({ error: error.message });
+  }
+};

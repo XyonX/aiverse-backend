@@ -1,16 +1,18 @@
 const express = require("express");
 const router = express.Router();
 const authController = require("../controllers/authController");
-const { verifyToken } = require("../middleware/auth");
+const { authenticate } = require("../middleware/auth");
+const { authorize } = require("../middleware/authorize");
 const processProfileData = require("../middleware/processProfileData");
 
-router.post("/register", authController.register);
-router.post("/login", authController.login);
-router.get("/me", verifyToken, authController.me); // Protected route
+router.post("/register", authenticate, authController.register);
+router.post("/login", authenticate, authController.login);
+router.get("/me", authenticate, authorize, authController.me); // Protected route
 router.patch(
   "/updateprofile",
   processProfileData.single("avatar"),
-  verifyToken,
+  authenticate,
+  authorize,
   authController.update
 );
 
