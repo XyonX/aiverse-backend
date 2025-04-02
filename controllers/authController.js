@@ -41,24 +41,33 @@ exports.register = async (req, res) => {
 
 exports.login = async (req, res) => {
   try {
-    const authHeader = req.headers.authorization; // Correct header reference
+    console.log("Login request received");
+
+    const authHeader = req.headers.authorization;
+    console.log("Authorization header:", authHeader);
 
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      console.log("Auth header missing or not properly formatted");
+      console.warn("Auth header missing or not properly formatted");
       return res
         .status(401)
         .json({ error: "Missing or malformed authorization header" });
     }
 
     const idToken = authHeader.split(" ")[1];
+    console.log("Extracted ID token:", idToken);
 
     // Verify the token
-    await admin.auth().verifyIdToken(idToken);
+    const decodedToken = await admin.auth().verifyIdToken(idToken);
+    console.log("Token successfully verified. User ID:", decodedToken.uid);
 
     // Token is valid, send a simple success response
     return res
       .status(200)
-      .json({ loggedIn: true, message: "Login successful" });
+      .json({
+        loggedIn: true,
+        message: "Login successful",
+        uid: decodedToken.uid,
+      });
   } catch (error) {
     console.error("Error in login:", error);
     return res

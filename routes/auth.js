@@ -6,7 +6,7 @@ const { authorize } = require("../middleware/authorize");
 const processProfileData = require("../middleware/processProfileData");
 
 router.post("/register", authenticate, authController.register);
-router.post("/login", authenticate, authController.login);
+router.post("/login", authController.login);
 router.get("/me", authenticate, authorize, authController.me); // Protected route
 router.patch(
   "/updateprofile",
