@@ -210,14 +210,12 @@ async function buildChatContext1(conversation, currentMessageId) {
 
 function createOpenAIClient(bot) {
   let openai;
+  console.log("Bot", bot);
+  console.log("api", decrypt(bot.apiKey));
 
   openai = new OpenAI({
-    apiKey: decrypt(bot.apiKey),
+    apiKey: process.env.OPENROUTER_API,
     baseURL: bot.endpoint,
-    defaultHeaders: {
-      "HTTP-Referer": "http://aiverseapp.site/", // Optional. Site URL for rankings on openrouter.ai.
-      "X-Title": "aiverse", // Optional. Site title for rankings on openrouter.ai.
-    },
   });
   return openai;
 }

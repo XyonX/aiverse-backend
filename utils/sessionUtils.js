@@ -75,8 +75,7 @@ const generateLLMResponse = async (messages, maxToken) => {
   };
 
   let openai = new OpenAI({
-    apiKey:
-      "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",
+    apiKey: process.env.OPENROUTER_API,
     baseURL: "https://openrouter.ai/api/v1",
   });
 

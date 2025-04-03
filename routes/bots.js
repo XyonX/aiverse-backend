@@ -5,5 +5,7 @@ const auth = require("../middleware/auth");
 
 router.get("/:id?", botController.getBots);
 router.post("/", botController.addBot);
+router.put("/:id", botController.editBotbyId);
+router.put("/model/:model", botController.editBotbyId);
 
 module.exports = router;
