@@ -22,6 +22,10 @@ const baseMessageSchema = new mongoose.Schema(
       type: Date,
       default: Date.now,
     },
+    isBookmarked: {
+      type: Boolean,
+      default: false,
+    },
     status: {
       type: String,
       enum: ["sent", "delivered", "read"],
