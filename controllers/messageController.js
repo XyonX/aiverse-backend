@@ -5,9 +5,14 @@ const { Conversation } = require("../models/conversation");
 const { OpenAI } = require("openai"); // Example using OpenAI
 const { decrypt } = require("../utils/encryption");
 const fs = require("fs");
-const appContext = JSON.parse(
-  fs.readFileSync("./context/appContext.json", "utf8")
-);
+const appContext = {
+  appName: "Aiverse",
+  purpose:
+    "A messaging platform for interacting with AI bots like ChatGPT, Gemini, and Grok.",
+  platform: "A chat-based interface simulating natural human conversation.",
+  theme: "modern ai messaging application",
+};
+
 const sessionUtils = require("../utils/sessionUtils");
 const encoding_for_model = require("@dqbd/tiktoken").encoding_for_model;
 
