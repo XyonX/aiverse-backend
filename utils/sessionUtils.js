@@ -9,15 +9,13 @@ const removeMd = require("remove-markdown");
 
 //2 hour in ms
 const SESSION_TIMEOUT = 6 * 60 * 60 * 1000;
+const encoding_for_model = require("@dqbd/tiktoken").encoding_for_model;
 
 const calculateMessageToken = (message) => {
-  const encoding = new Tiktoken(
-    cl100k_base.bpe_ranks,
-    cl100k_base.special_tokens,
-    cl100k_base.pat_str
-  );
-  const tokens = encoding.encode(message);
-  encoding.free();
+  const encoder = encoding_for_model("gpt-3.5-turbo");
+
+  const tokens = encoder.encode(message);
+  encoder.free();
   return tokens.length;
 };
 

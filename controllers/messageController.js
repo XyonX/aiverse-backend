@@ -1,27 +1,17 @@
-//messageController.js
+// messageController.js
 const Message = require("../models/message");
 const User = require("../models/user");
-const { Conversation } = require("../models/conversation");
-const { OpenAI } = require("openai"); // Example using OpenAI
+const { Conversation, Session } = require("../models/conversation");
+const { OpenAI } = require("openai");
 const { decrypt } = require("../utils/encryption");
-const fs = require("fs");
+const sessionUtils = require("../utils/sessionUtils");
+
 const appContext = {
   appName: "Aiverse",
   purpose:
     "A messaging platform for interacting with AI bots like ChatGPT, Gemini, and Grok.",
   platform: "A chat-based interface simulating natural human conversation.",
   theme: "modern ai messaging application",
-};
-
-const sessionUtils = require("../utils/sessionUtils");
-const encoding_for_model = require("@dqbd/tiktoken").encoding_for_model;
-
-const calculateMessageToken = (message) => {
-  const encoder = encoding_for_model("gpt-3.5-turbo");
-
-  const tokens = encoder.encode(message);
-  encoder.free();
-  return tokens.length;
 };
 
 // Helper function to format file size
@@ -32,7 +22,8 @@ function formatSize(bytes) {
   const i = Math.floor(Math.log(bytes) / Math.log(k));
   return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + " " + sizes[i];
 }
-// Helper functions
+
+// Helper function to create user message
 async function createUserMessage(conversationId, file, textContent, session) {
   let userMessage;
 
@@ -73,8 +64,12 @@ async function createUserMessage(conversationId, file, textContent, session) {
   await userMessage.save();
   return userMessage;
 }
+
+// Prepare system context with user and bot details
 async function prepareSystemContext(userId, conversation) {
-  const user = await User.findById(userId);
+  const user = await User.findById(userId).select(
+    "displayName username preferences"
+  );
   const bot = conversation.bot;
 
   return {
@@ -99,7 +94,8 @@ async function prepareSystemContext(userId, conversation) {
   };
 }
 
-async function buildChatContext(conversation) {
+// Build chat context efficiently
+async function buildChatContext(conversation, session) {
   console.log("Starting to build chat context...");
 
   const { historyTokens, maxPastSessions } =
@@ -108,13 +104,18 @@ async function buildChatContext(conversation) {
     `Token allocation - historyTokens: ${historyTokens}, maxPastSessions: ${maxPastSessions}`
   );
 
-  const closedSessions = conversation.sessions
-    .filter((s) => !s.isActive)
-    .sort((a, b) => new Date(a.endTime) - new Date(b.endTime))
-    .slice(-maxPastSessions);
+  // Fetch only necessary closed sessions directly from the database
+  const closedSessions = await Session.find({
+    conversation: conversation._id,
+    isActive: false,
+  })
+    .sort({ endTime: -1 })
+    .limit(maxPastSessions)
+    .select("summary")
+    .lean();
+
   console.log(`Found ${closedSessions.length} closed sessions to include`);
 
-  // Collect all summary messages in order
   const historicalContext = closedSessions.flatMap(
     (session) => session.summary || []
   );
@@ -123,103 +124,42 @@ async function buildChatContext(conversation) {
   );
 
   let tokenCount = historicalContext.reduce(
-    (sum, msg) => sum + calculateMessageToken(msg.content),
+    (sum, msg) => sum + sessionUtils.calculateMessageToken(msg.content),
     0
   );
   console.log(`Initial historical context token count: ${tokenCount}`);
 
+  // Trim historical context if it exceeds token limit
   while (tokenCount > historyTokens && historicalContext.length > 0) {
     const removedMsg = historicalContext.shift();
-    const removedTokens = calculateMessageToken(removedMsg.content);
+    const removedTokens = sessionUtils.calculateMessageToken(
+      removedMsg.content
+    );
     tokenCount -= removedTokens;
     console.log(
       `Removed message with ${removedTokens} tokens (new total: ${tokenCount})`
     );
   }
 
-  // Find the current active session
-  const currentSession = conversation.sessions.find((s) => s.isActive);
-  console.log(
-    currentSession ? "Found active session" : "No active session found"
-  );
-
-  // Get its sessionContext, default to empty array if no active session
-  const currentContext = currentSession ? currentSession.sessionContext : [];
+  // Use the active session's context directly
+  const currentContext = session.sessionContext || [];
   console.log(`Current session has ${currentContext.length} context messages`);
 
-  // Combine historical summaries and current session context
   const context = [...historicalContext, ...currentContext];
   console.log(`Final context built with ${context.length} total messages`);
 
   return context;
 }
 
-async function buildChatContext1(conversation, currentMessageId) {
-  const context = [];
-  const currentSession = conversation.sessions.find((s) => s.isActive);
-
-  // // Add historical summaries
-  // context.push(
-  //   ...conversation.historicalSummaries.map((summary) => ({
-  //     role: "system",
-  //     content: `Previous conversation summary: ${summary}`,
-  //   }))
-  // );
-  //we need to take recently closed 10 session excluding the current one  whihc one is active
-  //from that 10 session we need to take all the message summary array in this format
-  //  summary: [
-  //   // For AI context
-  //   {
-  //     role: {
-  //       type: String,
-  //       enum: ["system", "user", "assistant"],
-  //     },
-  //     content: String,
-  //   },
-  // ],
-  //and add it in the contexct
-  //so that theold message is added ifrst or the new one whhc is preffered by the llm
-  //then we need to tkae the currentsession.sessionContext and we need to append all the objectsd from it
-  // ite should be in order like ad the ollder message in those 10 session sumary array
-  //and the active sessoon sessionContext is contianing most recent message so the  context var should contian all of this in order
-  //here i had a previouis implemntaton
-  //you  have to fix it accoridn tot hte new conversation schema and sessio nshcmea
-
-  // Add current session messages (excluding current message)
-  if (currentSession) {
-    const previousMessages = currentSession.messages.filter(
-      (msgId) => msgId.toString() !== currentMessageId.toString()
-    );
-
-    if (previousMessages.length > 0) {
-      const messages = await Message.find({ _id: { $in: previousMessages } })
-        .sort({ timestamp: 1 })
-        .lean();
-
-      messages.forEach((msg) => {
-        context.push({
-          role: msg.sender === "user" ? "user" : "assistant",
-          content: msg.textContent || msg.content,
-        });
-      });
-    }
-  }
-
-  return context;
-}
-
+// Create OpenAI client
 function createOpenAIClient(bot) {
-  let openai;
-  console.log("Bot", bot);
-  console.log("api", decrypt(bot.apiKey));
-
-  openai = new OpenAI({
-    apiKey: process.env.OPENROUTER_API,
+  return new OpenAI({
+    apiKey: process.env.OPENROUTER_API || decrypt(bot.apiKey),
     baseURL: bot.endpoint,
   });
-  return openai;
 }
 
+// Handle streaming response
 async function handleStreamingResponse({
   res,
   conversation,
@@ -235,7 +175,6 @@ async function handleStreamingResponse({
 
   let botMessage;
   try {
-    // Create temporary bot message first
     botMessage = new Message.Text({
       conversation: conversationId,
       sender: "bot",
@@ -245,16 +184,15 @@ async function handleStreamingResponse({
     });
     await botMessage.save();
 
-    // Add user message to conversation immediately
     await sessionUtils.addMessagesToConversation(conversation, [
       userMessage._id,
     ]);
     console.log(
       `[Streaming] Added user message ${userMessage._id} to conversation`
     );
-  } catch (botMessageError) {
-    console.error("[Streaming] Initial setup failed:", botMessageError);
-    await userMessage.remove();
+  } catch (error) {
+    console.error("[Streaming] Initial setup failed:", error);
+    await userMessage.deleteOne();
     return res.status(500).json({ message: "Failed to initialize response" });
   }
 
@@ -263,7 +201,7 @@ async function handleStreamingResponse({
   );
 
   try {
-    let openai = createOpenAIClient(bot);
+    const openai = createOpenAIClient(bot);
     const stream = await openai.chat.completions.create({
       model: bot.model,
       messages: llmMessages,
@@ -275,8 +213,6 @@ async function handleStreamingResponse({
     for await (const chunk of stream) {
       if (chunk.choices?.[0]?.delta?.content) {
         const contentChunk = chunk.choices[0].delta.content;
-
-        // Remove placeholder on first content
         if (!firstContentReceived) {
           botMessage.textContent = contentChunk;
           firstContentReceived = true;
@@ -294,11 +230,7 @@ async function handleStreamingResponse({
     }
 
     botMessage.isTemporary = false;
-
-    console.log("Accumulated final bot response:", botMessage.textContent);
     await botMessage.save();
-
-    // Add bot message to conversation after successful streaming
     await sessionUtils.addMessagesToConversation(conversation, [
       botMessage._id,
     ]);
@@ -308,11 +240,7 @@ async function handleStreamingResponse({
     res.write(`data: ${JSON.stringify({ type: "complete", botMessage })}\n\n`);
   } catch (streamError) {
     console.error("[Streaming] Error:", streamError);
-    // In the error handling block
-    await Promise.all([
-      botMessage?.deleteOne(), // Changed from remove()
-      userMessage.deleteOne(), // Changed from remove()
-    ]);
+    await Promise.all([botMessage?.deleteOne(), userMessage.deleteOne()]);
     res.write(
       `data: ${JSON.stringify({
         type: "error",
@@ -323,17 +251,19 @@ async function handleStreamingResponse({
     res.end();
   }
 }
-async function handleRegularResponse(
+
+// Handle regular (non-streaming) response
+async function handleRegularResponse({
   res,
   conversation,
   userMessage,
   llmMessages,
   conversationId,
   bot,
-  session
-) {
+  session,
+}) {
   try {
-    let openai = createOpenAIClient(bot);
+    const openai = createOpenAIClient(bot);
     const completion = await openai.chat.completions.create({
       messages: llmMessages,
       model: bot.model,
@@ -347,11 +277,6 @@ async function handleRegularResponse(
     });
 
     await botMessage.save();
-    // await conversation.findByIdAndUpdate(conversationId, {
-    //   $push: { messages: { $each: [userMessage._id, botMessage._id] } },
-    //   $set: { lastMessageTimestamp: new Date() },
-    // });
-
     await sessionUtils.addMessagesToConversation(conversation, [
       userMessage._id,
       botMessage._id,
@@ -363,73 +288,71 @@ async function handleRegularResponse(
     });
   } catch (apiError) {
     console.error("[Response] API error:", apiError);
-    await userMessage.remove();
+    await userMessage.deleteOne();
     res.status(500).json({ message: "Error generating response" });
   }
 }
 
+// Main createMessage controller
 exports.createMessage = async (req, res) => {
   try {
     const { textContent, conversationId, userId } = req.body;
     const file = req.file;
 
-    // Validate input
     if (!textContent?.trim() && !file) {
       console.warn("[Message Handler] Validation failed: No content provided");
       return res.status(400).json({ message: "Content or file required" });
     }
     console.log("Message validation passed");
 
-    //001
-    const conversation = await Conversation.findById(conversationId)
-      .populate("bot") // Populate bot details
-      .populate("sessions"); // Populate session documents
+    // Fetch conversation and user concurrently
+    const [conversation, user] = await Promise.all([
+      Conversation.findById(conversationId).populate("bot"),
+      User.findById(userId).select("displayName username preferences"),
+    ]);
 
     if (!conversation)
       return res.status(404).json({ message: "Conversation not found" });
 
-    // Session management - ensure active session
+    // Get or create active session
     const session = await sessionUtils.getOrCreateActiveSession(conversation);
-
     if (!session) throw new Error("Failed to get or create active session");
 
-    // 1. Create and save user message
+    // Create user message
     const userMessage = await createUserMessage(
       conversationId,
       file,
       textContent,
       session
     );
-    console.log("User Messae created :", userMessage);
+    console.log("User Message created:", userMessage);
 
-    // 2. Prepare context-aware system message
-    const { systemMessage, user } = await prepareSystemContext(
-      userId,
-      conversation
-    );
+    // Prepare system context
+    const { systemMessage } = await prepareSystemContext(userId, conversation);
 
-    // 3. Build conversation context
-    const context = await buildChatContext(conversation);
+    // Build chat context
+    const context = await buildChatContext(conversation, session);
     console.log("Final context created:", context);
 
-    // 4. Prepare LLM messages array
+    // Prepare LLM messages
     const llmMessages = [
       { role: "system", content: systemMessage },
       ...context,
       { role: "user", content: userMessage.textContent },
     ];
 
+    // Check token limit
     const totalTokens = llmMessages.reduce(
-      (sum, msg) => sum + calculateMessageToken(msg.content),
+      (sum, msg) => sum + sessionUtils.calculateMessageToken(msg.content),
       0
     );
     if (totalTokens > conversation.bot.specification.context) {
       return res.status(400).json({ message: "Message exceeds token limit" });
     }
-    console.log("Sending message with total toke count:", totalTokens);
-    console.log("Messsage sent to llm:", llmMessages);
+    console.log("Sending message with total token count:", totalTokens);
+    console.log("Messages sent to LLM:", llmMessages);
 
-    // 5. Handle streaming response
+    // Handle response based on streaming setting
     if (conversation.bot.streamingEnabled) {
       return handleStreamingResponse({
         res,
@@ -440,21 +363,19 @@ exports.createMessage = async (req, res) => {
         bot: conversation.bot,
         session,
       });
+    } else {
+      return handleRegularResponse({
+        res,
+        conversation,
+        userMessage,
+        llmMessages,
+        conversationId,
+        bot: conversation.bot,
+        session,
+      });
     }
-
-    // Handle non-streaming response
-    return handleRegularResponse({
-      res,
-      conversation,
-      userMessage,
-      llmMessages,
-      conversationId,
-      bot: conversation.bot,
-      session,
-    });
   } catch (error) {
     console.error("[CreateMessage] Unexpected error:", error);
-
     if (res.headersSent) {
       res.write(
         `data: ${JSON.stringify({
@@ -469,17 +390,18 @@ exports.createMessage = async (req, res) => {
   }
 };
 
+// Fetch conversation messages
 exports.getConversationMessages = async (req, res) => {
   try {
     console.log(
       "[FetchMessages] Fetching messages for conversation:",
       req.params.conversationId
     );
-
     const messages = await Message.find({
       conversation: req.params.conversationId,
-    }).sort({ timestamp: 1 });
-
+    })
+      .sort({ timestamp: 1 })
+      .lean();
     console.log("[FetchMessages] Retrieved", messages.length, "messages.");
     res.json(messages);
   } catch (error) {
