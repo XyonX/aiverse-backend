@@ -121,21 +121,6 @@ const botSchema = new mongoose.Schema({
   },
 });
 
-// botSchema.pre("save", function (next) {
-//   const twentyPercent = this.specification.context * 0.2;
-//   const MIN_TOKENS = 1000;
-
-//   // MAX_TOKENS is the smaller of (10,000 or the model’s context)
-//   const MAX_TOKENS = Math.min(10000, this.specification.context);
-
-//   // Clamp between MIN and MAX
-//   this.messageTokenLimit = Math.min(
-//     Math.max(twentyPercent, MIN_TOKENS),
-//     MAX_TOKENS
-//   );
-
-//   next();
-// });
 botSchema.pre("save", function (next) {
   const context = this.specification.context; // Model’s total token capacity
   const twentyPercent = context * 0.2;
