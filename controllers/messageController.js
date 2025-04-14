@@ -293,46 +293,66 @@ async function handleRegularResponse({
   }
 }
 
-// Main createMessage controller
+// Modified createMessage controller with timing instrumentation
 exports.createMessage = async (req, res) => {
+  const processStart = Date.now();
   try {
     const { textContent, conversationId, userId } = req.body;
     const file = req.file;
+    let timingMetrics = {
+      total: 0,
+      fetch: 0,
+      session: 0,
+      messageCreate: 0,
+      systemContext: 0,
+      chatContext: 0,
+      tokenCheck: 0,
+      llm: 0,
+      firstChunk: 0,
+    };
 
+    // Validation
+    const validationStart = Date.now();
     if (!textContent?.trim() && !file) {
-      console.warn("[Message Handler] Validation failed: No content provided");
       return res.status(400).json({ message: "Content or file required" });
     }
-    console.log("Message validation passed");
+    timingMetrics.validation = Date.now() - validationStart;
 
-    // Fetch conversation and user concurrently
+    // Concurrent fetches
+    const fetchStart = Date.now();
     const [conversation, user] = await Promise.all([
       Conversation.findById(conversationId).populate("bot"),
       User.findById(userId).select("displayName username preferences"),
     ]);
+    timingMetrics.fetch = Date.now() - fetchStart;
 
     if (!conversation)
       return res.status(404).json({ message: "Conversation not found" });
 
-    // Get or create active session
+    // Session handling
+    const sessionStart = Date.now();
     const session = await sessionUtils.getOrCreateActiveSession(conversation);
-    if (!session) throw new Error("Failed to get or create active session");
+    timingMetrics.session = Date.now() - sessionStart;
 
-    // Create user message
+    // Message creation
+    const messageStart = Date.now();
     const userMessage = await createUserMessage(
       conversationId,
       file,
       textContent,
       session
     );
-    console.log("User Message created:", userMessage);
+    timingMetrics.messageCreate = Date.now() - messageStart;
 
-    // Prepare system context
+    // System context
+    const systemContextStart = Date.now();
     const { systemMessage } = await prepareSystemContext(userId, conversation);
+    timingMetrics.systemContext = Date.now() - systemContextStart;
 
-    // Build chat context
+    // Chat context
+    const chatContextStart = Date.now();
     const context = await buildChatContext(conversation, session);
-    console.log("Final context created:", context);
+    timingMetrics.chatContext = Date.now() - chatContextStart;
 
     // Prepare LLM messages
     const llmMessages = [
@@ -341,18 +361,20 @@ exports.createMessage = async (req, res) => {
       { role: "user", content: userMessage.textContent },
     ];
 
-    // Check token limit
+    // Token check
+    const tokenCheckStart = Date.now();
     const totalTokens = llmMessages.reduce(
       (sum, msg) => sum + sessionUtils.calculateMessageToken(msg.content),
       0
     );
+    timingMetrics.tokenCheck = Date.now() - tokenCheckStart;
+
     if (totalTokens > conversation.bot.specification.context) {
       return res.status(400).json({ message: "Message exceeds token limit" });
     }
-    console.log("Sending message with total token count:", totalTokens);
-    console.log("Messages sent to LLM:", llmMessages);
 
-    // Handle response based on streaming setting
+    // Response handling
+    const responseHandlerStart = Date.now();
     if (conversation.bot.streamingEnabled) {
       return handleStreamingResponse({
         res,
@@ -362,6 +384,8 @@ exports.createMessage = async (req, res) => {
         conversationId,
         bot: conversation.bot,
         session,
+        processStart,
+        timingMetrics,
       });
     } else {
       return handleRegularResponse({
@@ -372,21 +396,17 @@ exports.createMessage = async (req, res) => {
         conversationId,
         bot: conversation.bot,
         session,
+        processStart,
+        timingMetrics,
       });
     }
   } catch (error) {
-    console.error("[CreateMessage] Unexpected error:", error);
-    if (res.headersSent) {
-      res.write(
-        `data: ${JSON.stringify({
-          type: "error",
-          message: "Processing error",
-        })}\n\n`
-      );
-      res.end();
-    } else {
-      res.status(500).json({ message: "Error sending message" });
-    }
+    console.error("[CreateMessage] Error:", error);
+    timingMetrics.total = Date.now() - processStart;
+    logTimings(timingMetrics);
+    res
+      .status(500)
+      .json({ message: "Error sending message", timings: timingMetrics });
   }
 };
 
