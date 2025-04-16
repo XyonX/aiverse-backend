@@ -9,7 +9,7 @@ const options = {
   cert: fs.readFileSync("./certs/cert.pem"),
 };
 
-const PORT = process.env.PORT || 3001;
+const PORT = 443;
 
 // Create and start server
 https.createServer(options, app).listen(PORT, "0.0.0.0", () => {
