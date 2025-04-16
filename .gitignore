@@ -26,3 +26,6 @@ build/
 Thumbs.db
 
 config/serviceAccountKey.json
+
+#private key
+*.pem
