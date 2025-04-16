@@ -182,3 +182,66 @@ exports.editBotbyModel = async (req, res) => {
     res.status(400).json({ message: error.message });
   }
 };
+exports.createCustomBot = async (req, res) => {
+  console.log("Bot Creation req from user:", req.user._id);
+
+  try {
+    // Destructure required fields from request body
+    const {
+      name,
+      category,
+      description,
+      role,
+      personality,
+      backstory,
+      speciality,
+      primaryFunction,
+      interactionStyle,
+    } = req.body;
+
+    // Handle avatar upload
+    let avatar = `/uploads/avatars/default-bot.png`;
+    if (req.file) {
+      avatar = `/uploads/avatars/${req.file.filename}`;
+    }
+
+    // Find base bot
+    const baseBot = await Bot.findById("67cb48e055bb927827196841");
+    if (!baseBot) {
+      return res.status(404).json({ error: "Base bot not found" });
+    }
+
+    // Create system message
+    const systemMessage = `You are ${name}, a ${role} who is ${personality}. With a background in ${backstory}, you excel in ${speciality}, which you use to ${primaryFunction}. Your approach to interacting with others is ${interactionStyle}. Always respond as ${name}, maintaining your persona. Do not break character or reference being an AI.`;
+
+    // Create new bot
+    const newBot = new Bot({
+      name,
+      apiKey: baseBot.apiKey,
+      endpoint: baseBot.endpoint,
+      model: baseBot.model,
+      avatar,
+      description,
+      owner: req.user._id, // Should be the actual user creating the bot
+      context: { systemMessage },
+      type: "derived",
+      category,
+      baseBot: baseBot._id,
+      sessionSettings: baseBot.sessionSettings,
+      specification: baseBot.specification,
+      messageTokenLimit: baseBot.messageTokenLimit,
+    });
+
+    // Save the new bot
+    await newBot.save();
+
+    // Add bot to user's bots array
+    req.user.bots.push(newBot._id); // Changed from non-existent pushBack() to push()
+    await req.user.save(); // Don't forget to save the user document
+
+    return res.status(201).json(newBot);
+  } catch (error) {
+    console.error("Error creating bot:", error);
+    return res.status(500).json({ error: "Internal server error" });
+  }
+};

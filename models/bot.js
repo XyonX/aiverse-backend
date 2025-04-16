@@ -32,11 +32,26 @@ const botSchema = new mongoose.Schema({
     type: Boolean,
     default: false,
   },
+  rating: {
+    type: Number, // Decimal values for rating (e.g., 4.7)
+    min: 0, // Optional: Ensure the rating is within a valid range (0 to 5, for example)
+    max: 5,
+    default: 0, // Default to 0 if no rating is provided
+  },
+  reviews: {
+    type: Number, // Integer value representing the number of reviews
+    default: 0, // Default to 0 if no reviews exist
+  },
+
+  verified: {
+    type: Boolean, // Boolean flag to indicate if the bot is verified
+    default: false, // Default to false, assuming not verified initially
+  },
   isOnline: { type: Boolean, default: false }, // Indicates if the bot is online
   lastOnline: { type: Date, default: Date.now }, // Last time bot was online
   streamingEnabled: {
     type: Boolean,
-    default: false,
+    default: true,
   },
   owner: {
     type: mongoose.Schema.Types.ObjectId,
@@ -74,11 +89,21 @@ const botSchema = new mongoose.Schema({
       default: [],
     },
   },
+  type: {
+    type: String,
+    enum: ["raw", "derived"],
+    required: true,
+  },
 
   category: {
     type: String,
-    enum: ["general", "role-playing", "specialized"],
     default: "general",
+  },
+
+  baseBot: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Bot", // This points to another raw bot
+    default: null,
   },
   sessionSettings: {
     timeout: { type: Number, default: 6 }, // Hours of inactivity

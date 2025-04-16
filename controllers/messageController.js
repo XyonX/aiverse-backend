@@ -72,6 +72,9 @@ async function prepareSystemContext(userId, conversation) {
   );
   const bot = conversation.bot;
 
+  if (bot.type == "derived") {
+    return { systemMessage };
+  }
   return {
     systemMessage: `
       You are in [App: ${appContext.appName}] (Theme: ${appContext.theme}).
