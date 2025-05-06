@@ -18,7 +18,7 @@ const botSchema = new mongoose.Schema({
   model: {
     type: String,
     required: true,
-    unique: true,
+    // unique: true,removed this
   },
   avatar: {
     type: String,

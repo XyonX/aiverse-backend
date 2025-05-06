@@ -10,41 +10,13 @@ const removeMd = require("remove-markdown");
 //2 hour in ms
 const SESSION_TIMEOUT = 6 * 60 * 60 * 1000;
 const encoding_for_model = require("@dqbd/tiktoken").encoding_for_model;
+const encoder = encoding_for_model("gpt-3.5-turbo");
 
 const calculateMessageToken = (message) => {
-  const encoder = encoding_for_model("gpt-3.5-turbo");
-
-  const tokens = encoder.encode(message);
-  encoder.free();
-  return tokens.length;
+  return encoder.encode(message).length;
 };
 
 const generateLLMResponse = async (messages, maxToken) => {
-  // const prompt = {
-  //   role: "user",
-  //   content: `Summarize this conversation into 3-8 key points. Follow these rules:
-  //   - 1 user point → 1 assistant summary (paired)
-  //   - Use "user" for original requests and "assistant" for summarized answers
-  //   - Maximum 10 objects (5 user/assistant pairs)
-  //   - Keep "content" under 2 sentences
-  //   - Stay within ${maxToken} tokens total
-
-  //   Example output:
-  //   ${JSON.stringify(
-  //     [
-  //       { role: "user", content: "Asked about quantum computing applications" },
-  //       {
-  //         role: "assistant",
-  //         content: "Explained current uses in finance and drug discovery",
-  //       },
-  //     ],
-  //     null,
-  //     2
-  //   )}
-
-  //   Conversation to summarize:
-  //   ${JSON.stringify(messages, null, 2)}`,
-  // };
   const prompt = {
     role: "user",
     content: `ONLY output a JSON array with conversation summary. STRICTLY follow:
@@ -230,53 +202,6 @@ async function closeSession(conversation, session) {
   }
   await session.save();
 }
-
-// async function addMessagesToConversation(conversation, messageIds) {
-//   // console.log(
-//   //   `[DEBUG] Adding messages ${messageIds.join(", ")} to conversation ${
-//   //     conversation._id
-//   //   }`
-//   // );
-//   // try {
-//   //   // Get or create active session (handles expiration checks)
-//   //   const activeSession = await getOrCreateActiveSession(conversation);
-//   //   const { sessionTokens } = calculateTokenAllocation(conversation.bot);
-//   //   let tokenCount = activeSession.tokenCount;
-//   //   const messages = await Message.find({ _id: { $in: messageIds } }).exec();
-//   //   const formattedMessages = messages.map((message) => {
-//   //     const cleanMessage = removeMd(message.textContent);
-//   //     const messageToken = calculateMessageToken(cleanMessage);
-//   //     tokenCount = tokenCount + messageToken;
-//   //     return {
-//   //       role: message.sender === "bot" ? "assistant" : "user", // Fixed spelling
-//   //       content: cleanMessage
-//   //         .replace(/[\u{1F600}-\u{1F6FF}]/gu, "") // Remove all emojis
-//   //         .replace(/\\n/g, " ") // Convert newlines to spaces
-//   //         .replace(/\\"/g, '"') // Fix escaped quotes
-//   //         .slice(0, 300), // Clean truncation,
-//   //     };
-//   //   });
-//   //   activeSession.tokenCount = tokenCount;
-//   //   // Update session's messages array with all message IDs
-//   //   activeSession.sessionContext.push(...formattedMessages);
-//   //   // Update timestamps
-//   //   conversation.lastMessageTimestamp = new Date();
-//   //   conversation.lastActivity = new Date();
-//   //   // Save all changes in a single operation
-//   //   await conversation.save();
-//   //   console.log(
-//   //     `[INFO] Successfully added messages ${messageIds.join(
-//   //       ", "
-//   //     )} to conversation ${conversation._id} and session ${
-//   //       activeSession.sessionId
-//   //     }`
-//   //   );
-//   //   return conversation;
-//   // } catch (error) {
-//   //   console.error(`[ERROR] Failed to add messages:`, error.message);
-//   //   throw new Error(`Message addition failed: ${error.message}`);
-//   // }
-// }
 async function addMessagesToConversation(conversation, messageIds) {
   console.log(
     `[addMessagesToConversation] Starting process for conversation ${conversation._id} with ${messageIds.length} message(s)`

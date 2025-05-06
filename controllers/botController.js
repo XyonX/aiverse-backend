@@ -13,7 +13,8 @@ exports.getBots = async (req, res) => {
       }
       res.json([bot]); // Return as an array
     } else {
-      const bots = await Bot.find({ owner: null, isDefault: true });
+      // const bots = await Bot.find({ owner: null, isDefault: true });
+      const bots = await Bot.find({}); // Return all documents
       res.json(bots); // Already an array
     }
   } catch (error) {
@@ -200,9 +201,14 @@ exports.createCustomBot = async (req, res) => {
     } = req.body;
 
     // Handle avatar upload
-    let avatar = `/uploads/avatars/default-bot.png`;
+    // let avatar = `/uploads/avatars/default-bot.png`;
+    // if (req.file) {
+    //   avatar = `/uploads/avatars/${req.file.filename}`;
+    // }
+
+    let avatar = `uploads/bots/default-bot.png`;
     if (req.file) {
-      avatar = `/uploads/avatars/${req.file.filename}`;
+      avatar = `uploads/bots/${req.file.filename}`;
     }
 
     // Find base bot

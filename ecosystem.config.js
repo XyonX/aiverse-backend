@@ -5,7 +5,7 @@ module.exports = {
       script: "server.js",
       env: {
         NODE_ENV: "production",
-        PORT: 443, // This ensures you are using the port from .env
+        PORT: 3001, // This will be used by server.js now
       },
     },
   ],
