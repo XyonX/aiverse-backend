@@ -6,6 +6,22 @@ const { OpenAI } = require("openai");
 const { decrypt } = require("../utils/encryption");
 const sessionUtils = require("../utils/sessionUtils");
 
+// Add this helper at the top
+function logTimings(timingMetrics) {
+  console.log("=== Timing Metrics ===");
+  console.log(`Validation: ${timingMetrics.validation}ms`);
+  console.log(`Data Fetch: ${timingMetrics.fetch}ms`);
+  console.log(`Session Handling: ${timingMetrics.session}ms`);
+  console.log(`Message Creation: ${timingMetrics.messageCreate}ms`);
+  console.log(`System Context: ${timingMetrics.systemContext}ms`);
+  console.log(`Chat Context: ${timingMetrics.chatContext}ms`);
+  console.log(`Token Check: ${timingMetrics.tokenCheck}ms`);
+  console.log(`Response Handling: ${timingMetrics.responseHandler}ms`);
+  console.log(`First Chunk (Streaming): ${timingMetrics.firstChunk}ms`);
+  console.log(`Total: ${timingMetrics.total}ms`);
+  console.log("====================");
+}
+
 const appContext = {
   appName: "Aiverse",
   purpose:
@@ -73,7 +89,7 @@ async function prepareSystemContext(userId, conversation) {
   const bot = conversation.bot;
 
   if (bot.type == "derived") {
-    return { systemMessage };
+    return { systemMessage: bot.context.systemMessage };
   }
   return {
     systemMessage: `
@@ -154,6 +170,22 @@ async function buildChatContext(conversation, session) {
   return context;
 }
 
+// Create a client cache
+const clientCache = new Map();
+function getOpenAIClient(bot) {
+  const cacheKey = `${bot.endpoint}-${bot.apiKey}`;
+  if (!clientCache.has(cacheKey)) {
+    clientCache.set(
+      cacheKey,
+      new OpenAI({
+        apiKey: process.env.OPENROUTER_API || decrypt(bot.apiKey),
+        baseURL: bot.endpoint,
+      })
+    );
+  }
+  return clientCache.get(cacheKey);
+}
+
 // Create OpenAI client
 function createOpenAIClient(bot) {
   return new OpenAI({
@@ -162,7 +194,7 @@ function createOpenAIClient(bot) {
   });
 }
 
-// Handle streaming response
+// Update streaming response handler with timing
 async function handleStreamingResponse({
   res,
   conversation,
@@ -171,6 +203,8 @@ async function handleStreamingResponse({
   conversationId,
   bot,
   session,
+  timingMetrics,
+  processStart,
 }) {
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
@@ -178,10 +212,11 @@ async function handleStreamingResponse({
 
   let botMessage;
   try {
+    const firstChunkStart = Date.now();
     botMessage = new Message.Text({
       conversation: conversationId,
       sender: "bot",
-      textContent: "PLACEHOLDER",
+      textContent: "PLACEHOLDER", // Initial placeholder text
       isTemporary: true,
       sessionId: session.sessionId,
     });
@@ -193,69 +228,82 @@ async function handleStreamingResponse({
     console.log(
       `[Streaming] Added user message ${userMessage._id} to conversation`
     );
+
+    timingMetrics.responseHandler = Date.now() - processStart;
+
+    res.write(
+      `data: ${JSON.stringify({ type: "init", userMessage, botMessage })}\n\n`
+    );
+
+    try {
+      const openai = getOpenAIClient(bot);
+      const stream = await openai.chat.completions.create({
+        model: bot.model,
+        messages: llmMessages,
+        stream: true,
+      });
+
+      let firstContentReceived = false;
+
+      for await (const chunk of stream) {
+        if (chunk.choices?.[0]?.delta?.content) {
+          const contentChunk = chunk.choices[0].delta.content;
+
+          if (!firstContentReceived) {
+            timingMetrics.firstChunk = Date.now() - firstChunkStart;
+            firstContentReceived = true;
+            // Replace placeholder with the first content chunk
+            botMessage.textContent = contentChunk;
+          } else {
+            // Append subsequent chunks
+            botMessage.textContent += contentChunk;
+          }
+
+          await botMessage.save();
+          res.write(
+            `data: ${JSON.stringify({
+              type: "chunk",
+              content: contentChunk,
+            })}\n\n`
+          );
+        }
+      }
+
+      botMessage.isTemporary = false;
+      await botMessage.save();
+      await sessionUtils.addMessagesToConversation(conversation, [
+        botMessage._id,
+      ]);
+      console.log(
+        `[Streaming] Added bot message ${botMessage._id} to conversation`
+      );
+      res.write(
+        `data: ${JSON.stringify({ type: "complete", botMessage })}\n\n`
+      );
+    } catch (streamError) {
+      console.error("[Streaming] Error:", streamError);
+      await Promise.all([botMessage?.deleteOne(), userMessage.deleteOne()]);
+      res.write(
+        `data: ${JSON.stringify({
+          type: "error",
+          message: "Error generating response",
+        })}\n\n`
+      );
+    } finally {
+      timingMetrics.total = Date.now() - processStart;
+      logTimings(timingMetrics);
+      res.end();
+    }
   } catch (error) {
     console.error("[Streaming] Initial setup failed:", error);
     await userMessage.deleteOne();
-    return res.status(500).json({ message: "Failed to initialize response" });
-  }
-
-  res.write(
-    `data: ${JSON.stringify({ type: "init", userMessage, botMessage })}\n\n`
-  );
-
-  try {
-    const openai = createOpenAIClient(bot);
-    const stream = await openai.chat.completions.create({
-      model: bot.model,
-      messages: llmMessages,
-      stream: true,
-    });
-
-    let firstContentReceived = false;
-
-    for await (const chunk of stream) {
-      if (chunk.choices?.[0]?.delta?.content) {
-        const contentChunk = chunk.choices[0].delta.content;
-        if (!firstContentReceived) {
-          botMessage.textContent = contentChunk;
-          firstContentReceived = true;
-        } else {
-          botMessage.textContent += contentChunk;
-        }
-        await botMessage.save();
-        res.write(
-          `data: ${JSON.stringify({
-            type: "chunk",
-            content: contentChunk,
-          })}\n\n`
-        );
-      }
-    }
-
-    botMessage.isTemporary = false;
-    await botMessage.save();
-    await sessionUtils.addMessagesToConversation(conversation, [
-      botMessage._id,
-    ]);
-    console.log(
-      `[Streaming] Added bot message ${botMessage._id} to conversation`
-    );
-    res.write(`data: ${JSON.stringify({ type: "complete", botMessage })}\n\n`);
-  } catch (streamError) {
-    console.error("[Streaming] Error:", streamError);
-    await Promise.all([botMessage?.deleteOne(), userMessage.deleteOne()]);
-    res.write(
-      `data: ${JSON.stringify({
-        type: "error",
-        message: "Error generating response",
-      })}\n\n`
-    );
-  } finally {
-    res.end();
+    timingMetrics.total = Date.now() - processStart;
+    logTimings(timingMetrics);
+    res.status(500).json({ message: "Failed to initialize response" });
   }
 }
 
-// Handle regular (non-streaming) response
+// Update regular response handler with timing
 async function handleRegularResponse({
   res,
   conversation,
@@ -264,13 +312,17 @@ async function handleRegularResponse({
   conversationId,
   bot,
   session,
+  timingMetrics,
+  processStart,
 }) {
   try {
     const openai = createOpenAIClient(bot);
+    const startTime = Date.now();
     const completion = await openai.chat.completions.create({
       messages: llmMessages,
       model: bot.model,
     });
+    timingMetrics.responseHandler = Date.now() - startTime;
 
     const botMessage = new Message.Text({
       conversation: conversationId,
@@ -285,39 +337,82 @@ async function handleRegularResponse({
       botMessage._id,
     ]);
 
+    timingMetrics.total = Date.now() - processStart;
+    logTimings(timingMetrics);
+
     res.json({
       userMessage: userMessage.toObject(),
       botMessage: botMessage.toObject(),
+      timings: timingMetrics,
     });
   } catch (apiError) {
     console.error("[Response] API error:", apiError);
     await userMessage.deleteOne();
-    res.status(500).json({ message: "Error generating response" });
+    timingMetrics.total = Date.now() - processStart;
+    logTimings(timingMetrics);
+    res.status(500).json({
+      message: "Error generating response",
+      timings: timingMetrics,
+    });
   }
 }
 
-// Modified createMessage controller with timing instrumentation
+// Add timing to message fetching endpoint
+exports.getConversationMessages = async (req, res) => {
+  const startTime = Date.now();
+  try {
+    console.log(
+      "[FetchMessages] Fetching messages for conversation:",
+      req.params.conversationId
+    );
+    const messages = await Message.find({
+      conversation: req.params.conversationId,
+    })
+      .sort({ timestamp: 1 })
+      .lean();
+    console.log("[FetchMessages] Retrieved", messages.length, "messages.");
+    res.json({ messages, timings: { fetch: Date.now() - startTime } });
+  } catch (error) {
+    console.error("[FetchMessages] Error fetching messages:", error);
+    res.status(500).json({
+      message: "Error fetching messages",
+      timings: { fetch: Date.now() - startTime },
+    });
+  } finally {
+    console.log("[FetchMessages] Finished processing request for messages.");
+  }
+};
+
+// Modified createMessage controller with enhanced timing
 exports.createMessage = async (req, res) => {
   const processStart = Date.now();
   try {
     const { textContent, conversationId, userId } = req.body;
     const file = req.file;
+    const startTime = Date.now();
+
     let timingMetrics = {
       total: 0,
+      validation: 0,
       fetch: 0,
       session: 0,
       messageCreate: 0,
       systemContext: 0,
       chatContext: 0,
       tokenCheck: 0,
-      llm: 0,
+      responseHandler: 0,
       firstChunk: 0,
     };
 
     // Validation
     const validationStart = Date.now();
     if (!textContent?.trim() && !file) {
-      return res.status(400).json({ message: "Content or file required" });
+      timingMetrics.validation = Date.now() - validationStart;
+      timingMetrics.total = Date.now() - processStart;
+      logTimings(timingMetrics);
+      return res
+        .status(400)
+        .json({ message: "Content or file required", timings: timingMetrics });
     }
     timingMetrics.validation = Date.now() - validationStart;
 
@@ -347,14 +442,25 @@ exports.createMessage = async (req, res) => {
     );
     timingMetrics.messageCreate = Date.now() - messageStart;
 
-    // System context
-    const systemContextStart = Date.now();
-    const { systemMessage } = await prepareSystemContext(userId, conversation);
-    timingMetrics.systemContext = Date.now() - systemContextStart;
+    // // System context
+    // const systemContextStart = Date.now();
+    // const { systemMessage } = await prepareSystemContext(userId, conversation);
+    // timingMetrics.systemContext = Date.now() - systemContextStart;
 
-    // Chat context
+    // // Chat context
+    // const chatContextStart = Date.now();
+    // const context = await buildChatContext(conversation, session);
+    // timingMetrics.chatContext = Date.now() - chatContextStart;
+
+    const systemContextStart = Date.now();
     const chatContextStart = Date.now();
-    const context = await buildChatContext(conversation, session);
+    // Optimized parallel approach
+    const [systemContextResult, context] = await Promise.all([
+      prepareSystemContext(userId, conversation),
+      buildChatContext(conversation, session),
+    ]);
+    const { systemMessage } = systemContextResult;
+    timingMetrics.systemContext = Date.now() - systemContextStart;
     timingMetrics.chatContext = Date.now() - chatContextStart;
 
     // Prepare LLM messages
@@ -366,14 +472,31 @@ exports.createMessage = async (req, res) => {
 
     // Token check
     const tokenCheckStart = Date.now();
-    const totalTokens = llmMessages.reduce(
-      (sum, msg) => sum + sessionUtils.calculateMessageToken(msg.content),
-      0
-    );
+    // const totalTokens = llmMessages.reduce(
+    //   (sum, msg) => sum + sessionUtils.calculateMessageToken(msg.content),
+    //   0
+    // );
+
+    // Optimized version with caching
+    const tokenCache = new Map();
+    const totalTokens = llmMessages.reduce((sum, msg) => {
+      if (!tokenCache.has(msg.content)) {
+        tokenCache.set(
+          msg.content,
+          sessionUtils.calculateMessageToken(msg.content)
+        );
+      }
+      return sum + tokenCache.get(msg.content);
+    }, 0);
     timingMetrics.tokenCheck = Date.now() - tokenCheckStart;
 
     if (totalTokens > conversation.bot.specification.context) {
-      return res.status(400).json({ message: "Message exceeds token limit" });
+      timingMetrics.total = Date.now() - processStart;
+      logTimings(timingMetrics);
+      return res.status(400).json({
+        message: "Message exceeds token limit",
+        timings: timingMetrics,
+      });
     }
 
     // Response handling
@@ -387,8 +510,8 @@ exports.createMessage = async (req, res) => {
         conversationId,
         bot: conversation.bot,
         session,
-        processStart,
         timingMetrics,
+        processStart,
       });
     } else {
       return handleRegularResponse({
@@ -399,8 +522,8 @@ exports.createMessage = async (req, res) => {
         conversationId,
         bot: conversation.bot,
         session,
-        processStart,
         timingMetrics,
+        processStart,
       });
     }
   } catch (error) {
