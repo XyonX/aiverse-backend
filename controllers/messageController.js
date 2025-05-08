@@ -383,14 +383,14 @@ exports.getConversationMessages = async (req, res) => {
   }
 };
 
-// Modified createMessage controller with enhanced timing
+// In messageController.js
 exports.createMessage = async (req, res) => {
   const processStart = Date.now();
   try {
     const { textContent, conversationId, userId } = req.body;
     const file = req.file;
-    const startTime = Date.now();
 
+    // Define timingMetrics here
     let timingMetrics = {
       total: 0,
       validation: 0,
@@ -409,7 +409,6 @@ exports.createMessage = async (req, res) => {
     if (!textContent?.trim() && !file) {
       timingMetrics.validation = Date.now() - validationStart;
       timingMetrics.total = Date.now() - processStart;
-      logTimings(timingMetrics);
       return res
         .status(400)
         .json({ message: "Content or file required", timings: timingMetrics });
@@ -442,25 +441,14 @@ exports.createMessage = async (req, res) => {
     );
     timingMetrics.messageCreate = Date.now() - messageStart;
 
-    // // System context
-    // const systemContextStart = Date.now();
-    // const { systemMessage } = await prepareSystemContext(userId, conversation);
-    // timingMetrics.systemContext = Date.now() - systemContextStart;
-
-    // // Chat context
-    // const chatContextStart = Date.now();
-    // const context = await buildChatContext(conversation, session);
-    // timingMetrics.chatContext = Date.now() - chatContextStart;
-
+    // System context
     const systemContextStart = Date.now();
-    const chatContextStart = Date.now();
-    // Optimized parallel approach
-    const [systemContextResult, context] = await Promise.all([
-      prepareSystemContext(userId, conversation),
-      buildChatContext(conversation, session),
-    ]);
-    const { systemMessage } = systemContextResult;
+    const { systemMessage } = await prepareSystemContext(userId, conversation);
     timingMetrics.systemContext = Date.now() - systemContextStart;
+
+    // Chat context
+    const chatContextStart = Date.now();
+    const context = await buildChatContext(conversation, session);
     timingMetrics.chatContext = Date.now() - chatContextStart;
 
     // Prepare LLM messages
@@ -472,12 +460,6 @@ exports.createMessage = async (req, res) => {
 
     // Token check
     const tokenCheckStart = Date.now();
-    // const totalTokens = llmMessages.reduce(
-    //   (sum, msg) => sum + sessionUtils.calculateMessageToken(msg.content),
-    //   0
-    // );
-
-    // Optimized version with caching
     const tokenCache = new Map();
     const totalTokens = llmMessages.reduce((sum, msg) => {
       if (!tokenCache.has(msg.content)) {
@@ -492,7 +474,6 @@ exports.createMessage = async (req, res) => {
 
     if (totalTokens > conversation.bot.specification.context) {
       timingMetrics.total = Date.now() - processStart;
-      logTimings(timingMetrics);
       return res.status(400).json({
         message: "Message exceeds token limit",
         timings: timingMetrics,
@@ -528,7 +509,7 @@ exports.createMessage = async (req, res) => {
     }
   } catch (error) {
     console.error("[CreateMessage] Error:", error);
-    timingMetrics.total = Date.now() - processStart;
+    timingMetrics.total = Date.now() - processStart; // Ensure timingMetrics is defined here
     logTimings(timingMetrics);
     res
       .status(500)
