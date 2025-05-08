@@ -52,7 +52,14 @@ const generateLLMResponse = async (messages, maxToken) => {
   try {
     const completion = await openai.chat.completions.create({
       model: "deepseek/deepseek-chat-v3-0324:free",
-      messages: [prompt],
+      messages: [
+        {
+          role: "system",
+          content:
+            "You are an asistant that only speaks JSON. do not write normal text.",
+        },
+        prompt,
+      ],
       temperature: 0.3,
       max_tokens: maxToken,
     });
@@ -163,8 +170,16 @@ async function getOrCreateActiveSession(conversation) {
     console.log(
       `[INFO] Session ${activeSession.sessionId} expired (${timeSinceLastActivity}ms > ${SESSION_TIMEOUT}ms timeout)`
     );
-    // Session expired - close it
-    await closeSession(conversation, activeSession);
+    activeSession.isActive = false;
+    activeSession.endTime = new Date();
+    await Session.updateOne(
+      { _id: activeSession._id },
+      { $set: { isActive: false, endTime: new Date() } }
+    );
+
+    closeSession(conversation, activeSession).catch((error) =>
+      console.error("Background session closing failed:", error)
+    );
   }
 
   const generatedId = uuidv4();
@@ -188,19 +203,35 @@ async function getOrCreateActiveSession(conversation) {
 }
 
 async function closeSession(conversation, session) {
-  session.isActive = false;
-  session.endTime = new Date();
-  if (session.sessionContext.length > 0) {
-    const { summarizeTokenLength } = calculateTokenAllocation(conversation.bot);
-    session.summary = await generateSummary(
-      session.sessionContext,
-      summarizeTokenLength
-    );
+  try {
+    // Get fresh document instance
+    const freshSession = await Session.findById(session._id);
+
+    // Atomic update for summary generation
+    if (freshSession.sessionContext.length > 0) {
+      const { summarizeTokenLength } = calculateTokenAllocation(
+        conversation.bot
+      );
+      const summary = await generateSummary(
+        freshSession.sessionContext,
+        summarizeTokenLength
+      );
+
+      await Session.findOneAndUpdate(
+        { _id: freshSession._id },
+        {
+          $set: { summary },
+          $inc: { __v: 1 }, // Manually increment version
+        }
+      );
+    }
+
     console.log(
-      `Summargy geenrated for  ${session.sessionContext.length} seassion messages at ${summarizeTokenLength} token limit `
+      `Summary generated for ${freshSession.sessionContext.length} messages`
     );
+  } catch (error) {
+    console.error(`Failed to close session ${session._id}:`, error);
   }
-  await session.save();
 }
 async function addMessagesToConversation(conversation, messageIds) {
   console.log(
@@ -213,24 +244,26 @@ async function addMessagesToConversation(conversation, messageIds) {
     console.log(
       `[Session] Getting or creating active session for conversation ${conversation._id}`
     );
-    const activeSession = await getOrCreateActiveSession(
+
+    // Parallel execution starters
+    const activeSessionPromise = getOrCreateActiveSession(
       conversation,
       conversation.bot
     );
+    const messagesPromise = Message.find({ _id: { $in: messageIds } }).exec();
+
+    // Wait for BOTH first
+    const [activeSession, messages] = await Promise.all([
+      activeSessionPromise,
+      messagesPromise,
+    ]);
+
+    // NOW initialize token-related values
     console.log(
       `[Session] Active session ${activeSession._id} found with ${activeSession.tokenCount} tokens`
     );
-
     const { sessionTokens } = calculateTokenAllocation(conversation.bot);
-    console.log(`[Token] Session token limit: ${sessionTokens}`);
-    let tokenCount = activeSession.tokenCount;
-    console.log(`[Token] Current token count: ${tokenCount}`);
-
-    // Fetch messages
-    console.log(
-      `[Message] Fetching ${messageIds.length} messages from database`
-    );
-    const messages = await Message.find({ _id: { $in: messageIds } }).exec();
+    let tokenCount = activeSession.tokenCount; // Now safe to access
     console.log(`[Message] Retrieved ${messages.length} messages`);
 
     // Process each message
@@ -294,9 +327,11 @@ async function addMessagesToConversation(conversation, messageIds) {
     conversation.lastMessageTimestamp = new Date();
     conversation.lastActivity = new Date();
 
+    // console.log(`[Save] Saving session and conversation updates`);
+    // await activeSession.save();
+    // await conversation.save();
     console.log(`[Save] Saving session and conversation updates`);
-    await activeSession.save();
-    await conversation.save();
+    await Promise.all([activeSession.save(), conversation.save()]);
 
     console.log(
       `[Success] Added ${messages.length} messages to conversation ${conversation._id}`
