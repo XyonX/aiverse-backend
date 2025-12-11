@@ -1,6 +1,10 @@
 pipeline {
     agent any
 
+    tools {
+        nodejs 'node18'
+    }
+
     environment {
         MONGODB_URI   = credentials('MONGODB_URI')
         JWT_SECRET    = credentials('jwt_secret_aiverse')
