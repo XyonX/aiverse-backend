@@ -32,5 +32,8 @@ config/serviceAccountKey.json
 portainer_setup.txt
 docker_setup.txt
 
+# Migrations (contains scripts with credentials; keep out of git)
+migrations/
+
 # Local scratch notes (tracked previously)
 notes.js
