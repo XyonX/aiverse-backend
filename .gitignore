@@ -29,3 +29,8 @@ config/serviceAccountKey.json
 
 #private key
 *.pem
+portainer_setup.txt
+docker_setup.txt
+
+# Local scratch notes (tracked previously)
+notes.js
