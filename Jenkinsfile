@@ -11,12 +11,6 @@ pipeline {
 
     stages {
 
-        stage('Checkout Code') {
-            steps {
-                git url: 'https://github.com/XyonX/aiverse-backend.git'
-            }
-        }
-
         stage('Install Dependencies') {
             steps {
                 sh 'npm install'
