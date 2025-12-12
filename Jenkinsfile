@@ -9,6 +9,7 @@ pipeline {
         MONGODB_URI   = credentials('MONGODB_URI')
         JWT_SECRET    = credentials('jwt_secret_aiverse')
         OPENROUTER_API = credentials('openrouter_api_aiverse')
+        FIREBASE_SERVICE_ACCOUNT = credentials('FIREBASE_SERVICE_ACCOUNT')
 
         DOCKER_IMAGE = "xyonx/aiverse-backend"
     }
