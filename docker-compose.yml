@@ -1,0 +1,17 @@
+version: "3.9"
+
+services:
+  beautify-backend:
+    image: aiverse-backend
+    container_name: aiverse-backend
+    env_file:
+      - .env
+    ports:
+      - "4002:4002"
+    restart: unless-stopped
+    networks:
+      - proxy
+
+networks:
+  proxy:
+    external: true
