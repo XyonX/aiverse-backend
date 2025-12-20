@@ -1,6 +1,5 @@
 const express = require("express");
 const cors = require("cors");
-const connectDB = require("./config/db");
 const authRoutes = require("./routes/auth");
 const botRoutes = require("./routes/bots");
 const messageRoutes = require("./routes/messages");
@@ -10,21 +9,8 @@ const multer = require("multer");
 const cookieParser = require("cookie-parser");
 
 const app = express();
-connectDB();
 
-// app.use(
-//   cors({
-//     origin: [
-//       "http://localhost:3000",
-//       "https://aiverseapp.site",
-//       "https://www.aiverseapp.site",
-//       "https://aiverseapp.onrender.com",
-//       "https://www.aiverseapp.onrender.com",
-//     ],
-//     methods: "GET,POST,PUT,DELETE",
-//     credentials: true,
-//   })
-// );
+// All middlewares
 app.use(
   cors({
     origin: [
@@ -41,15 +27,10 @@ app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 app.use(express.json());
 app.use(cookieParser());
 
-//multer middlware for  the incoming chat file
-
+// Multer
 const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, "uploads/");
-  },
-  filename: (req, file, cb) => {
-    cb(null, Date.now() + path.extname(file.originalname));
-  },
+  destination: (req, file, cb) => cb(null, "uploads/"),
+  filename: (req, file, cb) => cb(null, Date.now() + path.extname(file.originalname)),
 });
 
 const upload = multer({ storage });
