@@ -5,7 +5,7 @@ services:
     image: aiverse-backend
     container_name: aiverse-backend
     env_file:
-      - .env
+      - ${ENV_FILE}
     ports:
       - "4002:4002"
     restart: unless-stopped
